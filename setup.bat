@@ -18,8 +18,43 @@ if /i "%~1"=="--check" (
   exit /b 0
 )
 
+set "INSTALLER_MODE="
+set "ALLOW_SLOW="
+if /i "%~1"=="--installed" set "INSTALLER_MODE=1"
+if /i "%~2"=="--installed" set "INSTALLER_MODE=1"
+if /i "%~1"=="--allow-slow" set "ALLOW_SLOW=1"
+if /i "%~2"=="--allow-slow" set "ALLOW_SLOW=1"
+
+rem ---- choose the fastest supported hardware path before large downloads ----
+set "HAS_NVIDIA="
+where nvidia-smi >nul 2>nul
+if not errorlevel 1 set "HAS_NVIDIA=1"
+rem Inno Setup is a 32-bit process, so System32 can be redirected to SysWOW64.
+rem Sysnative reliably exposes the real 64-bit NVIDIA utility in that case.
+if exist "%SystemRoot%\System32\nvidia-smi.exe" set "HAS_NVIDIA=1"
+if exist "%SystemRoot%\Sysnative\nvidia-smi.exe" set "HAS_NVIDIA=1"
+if defined FLOW_TEST_FORCE_CPU set "HAS_NVIDIA="
+
+set "FLOW_DEFAULT_MODEL=small"
+if defined HAS_NVIDIA set "FLOW_DEFAULT_MODEL=turbo"
+
+if not defined HAS_NVIDIA (
+  echo   IMPORTANT HARDWARE WARNING
+  echo   --------------------------
+  echo   This PC has no supported NVIDIA graphics card.
+  echo   Flow will use its smallest speech model, but it may still be slow.
+  echo   On older PCs it may take a long time after every recording and may
+  echo   not be useful.
+  echo.
+  if not defined ALLOW_SLOW (
+    if defined INSTALLER_MODE exit /b 3
+    choice /C YN /N /M "Continue with the slower CPU version? [Y/N] "
+    if errorlevel 2 exit /b 3
+  )
+)
+
 rem ---- keep the running app in a permanent local folder ---------------------
-echo   [1/6] Preparing Flow...
+echo   [1/7] Preparing Flow...
 if /i "%SOURCE_DIR_TRIMMED%"=="%APP_DIR%" goto :copy_done
 if not exist "%APP_DIR%" mkdir "%APP_DIR%"
 robocopy "%SOURCE_DIR%" "%APP_DIR%" /E /R:1 /W:1 /XD venv .git __pycache__ /XF settings.json *.wav *.mp3 *.m4a >nul
@@ -63,7 +98,7 @@ if not defined PY_CMD (
     echo   Install Python 3.12 from https://www.python.org/downloads/
     echo   then run Install Flow again.
     echo.
-    pause
+    if not defined INSTALLER_MODE pause
     exit /b 1
   )
   winget install --id Python.Python.3.12 --exact --scope user ^
@@ -75,11 +110,11 @@ if not defined PY_CMD (
 "%PY_CMD%" %PY_ARGS% -c "import sys; sys.exit(0 if sys.version_info>=(3,10) else 1)" 2>nul
 if errorlevel 1 (
   echo   Python 3.10 or newer is required.
-  pause
+  if not defined INSTALLER_MODE pause
   exit /b 1
 )
 
-echo   [2/6] Creating the virtual environment...
+echo   [2/7] Creating the virtual environment...
 if not exist venv (
   "%PY_CMD%" %PY_ARGS% -m venv venv
   if errorlevel 1 goto :fail
@@ -89,22 +124,14 @@ if not exist venv (
 
 set VPY=venv\Scripts\python.exe
 
-echo   [3/6] Updating pip...
+echo   [3/7] Updating pip...
 "%VPY%" -m pip install --quiet --upgrade pip
 if errorlevel 1 goto :fail
 
 rem ---- torch -----------------------------------------------------------------
-echo   [4/6] Installing PyTorch ^(about 2.5 GB, this takes a while^)...
-set "HAS_NVIDIA="
-where nvidia-smi >nul 2>nul
-if not errorlevel 1 set "HAS_NVIDIA=1"
-rem Inno Setup is a 32-bit process, so System32 can be redirected to SysWOW64.
-rem Sysnative reliably exposes the real 64-bit NVIDIA utility in that case.
-if exist "%SystemRoot%\System32\nvidia-smi.exe" set "HAS_NVIDIA=1"
-if exist "%SystemRoot%\Sysnative\nvidia-smi.exe" set "HAS_NVIDIA=1"
+echo   [4/7] Installing the best AI engine for this PC...
 if not defined HAS_NVIDIA (
   echo         No NVIDIA GPU detected - installing the CPU build.
-  echo         Flow will still work, but transcription will be much slower.
   "%VPY%" -m pip install torch==2.6.0 torchaudio==2.6.0
 ) else (
   echo         NVIDIA GPU detected - installing the CUDA build.
@@ -112,13 +139,26 @@ if not defined HAS_NVIDIA (
 )
 if errorlevel 1 goto :fail
 
-echo   [5/6] Installing everything else...
+echo   [5/7] Verifying the hardware choice...
+if defined HAS_NVIDIA (
+  "%VPY%" hardware_profile.py --expected-nvidia
+  if errorlevel 1 goto :gpu_fail
+) else (
+  "%VPY%" hardware_profile.py --force-device cpu
+  if errorlevel 1 goto :fail
+)
+set "FLOW_DEFAULT_MODEL="
+set /p FLOW_DEFAULT_MODEL=<"%LOCALAPPDATA%\Flow\recommended_model.txt"
+if /i not "%FLOW_DEFAULT_MODEL%"=="small" if /i not "%FLOW_DEFAULT_MODEL%"=="turbo" if /i not "%FLOW_DEFAULT_MODEL%"=="large" set "FLOW_DEFAULT_MODEL="
+if not defined FLOW_DEFAULT_MODEL goto :fail
+
+echo   [6/7] Installing everything else...
 rem Keep third-party packages from replacing the matching CUDA/CPU PyTorch pair.
 "%VPY%" -m pip install -r requirements.txt --constraint constraints.txt
 if errorlevel 1 goto :fail
 
-echo   [6/6] Downloading the speech model for offline use...
-"%VPY%" prepare_offline.py
+echo   [7/7] Downloading the recommended speech model for offline use...
+"%VPY%" prepare_offline.py --model "%FLOW_DEFAULT_MODEL%"
 if errorlevel 1 goto :fail
 
 rem ---- icon + shortcut -------------------------------------------------------
@@ -140,11 +180,24 @@ echo   Done. Launch "Flow" from your Desktop.
 echo.
 echo   Setup has downloaded everything needed for normal offline dictation.
 echo.
-if /i not "%~1"=="--installed" pause
+if defined HAS_NVIDIA (
+  echo   Flow is optimized for this PC's NVIDIA graphics card.
+) else (
+  echo   Flow is using the smallest model because this PC will run on its CPU.
+)
+echo.
+if not defined INSTALLER_MODE pause
 exit /b 0
+
+:gpu_fail
+echo.
+echo   Flow found an NVIDIA graphics card, but could not enable it.
+echo   Setup stopped instead of silently installing a very slow version.
+if not defined INSTALLER_MODE pause
+exit /b 4
 
 :fail
 echo.
 echo   Setup failed - see the messages above.
-if /i not "%~1"=="--installed" pause
+if not defined INSTALLER_MODE pause
 exit /b 1

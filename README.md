@@ -21,8 +21,17 @@ The first public installer was not digitally signed, so Windows showed
 bypass a security warning. A normal one-click installer will return after it
 has a verified digital signature.
 
-An NVIDIA GPU is strongly recommended. Setup falls back to a CPU build
-automatically if there isn't one, but transcription is many times slower.
+Setup checks each computer before large downloads begin:
+
+| Computer | Automatic setup |
+|---|---|
+| Supported NVIDIA graphics | CUDA acceleration + Turbo model |
+| No supported NVIDIA graphics | CPU engine + smaller Small model |
+| Low-memory or low-core CPU | Small model + a clear **may not be useful** warning |
+
+The installer asks before continuing with a CPU-only setup. Flow also shows the
+hardware result in the app. It never silently chooses the slow CPU engine when
+an NVIDIA card was detected but could not be enabled.
 
 For now, experienced users can inspect the public source and use the ZIP version:
 
@@ -35,7 +44,8 @@ environment, installs everything (about 3 GB of downloads), generates the icon
 and puts a **Flow** shortcut on the Desktop. It takes 5–15 minutes depending on
 your connection.
 
-The default speech model downloads during setup, not on first launch.
+The speech model recommended for that computer downloads during setup, not on
+first launch. Choosing a different model later may require internet once.
 
 **Windows only.** Typing into other apps uses Win32 APIs (`SendInput`,
 clipboard, foreground-window handling) that have no macOS or Linux equivalent
@@ -89,7 +99,7 @@ punctuation tidied.
 
 ### Speed
 
-Measured on this PC with weights already cached:
+Measured on an NVIDIA RTX 4060 with weights already cached:
 
 | Model | Startup | Per phrase |
 |---|---|---|
@@ -97,9 +107,9 @@ Measured on this PC with weights already cached:
 | Small | 6s | 1.2s |
 | Large | 17s | 3.8s |
 
-Turbo is the default — roughly 3.4x faster per phrase than Large with no
-visible quality difference at dictation length. If the first launch felt slow,
-that was the one-off model download, not the load.
+Turbo is recommended automatically for supported NVIDIA computers. Small is
+recommended for CPU-only computers because it is much less demanding. Even
+Small can be slow on an older CPU, so setup warns before downloading it.
 
 Switch on **Start with Windows** and the model loads at login, so it is always
 warm by the time you need it.

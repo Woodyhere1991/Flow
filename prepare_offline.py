@@ -1,15 +1,30 @@
-"""Download and verify Flow's default speech model during installation."""
+"""Download and verify Flow's selected speech model during installation."""
+
+import argparse
+import os
 
 from huggingface_hub import snapshot_download
 
 
-MODEL_ID = "nyralabs/CrisperWhisper2.0_turbo"
+MODELS = {
+    size: f"nyralabs/CrisperWhisper2.0_{size}"
+    for size in ("small", "turbo", "large")
+}
 
 
 def main() -> None:
-    print(f"Downloading {MODEL_ID}...")
-    model_path = snapshot_download(repo_id=MODEL_ID)
-    verified_path = snapshot_download(repo_id=MODEL_ID, local_files_only=True)
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--model",
+        choices=sorted(MODELS),
+        default=os.environ.get("FLOW_DEFAULT_MODEL", "turbo"),
+    )
+    args = parser.parse_args()
+    model_id = MODELS[args.model]
+
+    print(f"Downloading {model_id}...")
+    model_path = snapshot_download(repo_id=model_id)
+    verified_path = snapshot_download(repo_id=model_id, local_files_only=True)
     if model_path != verified_path:
         raise RuntimeError("The offline model cache could not be verified.")
     print("Speech model ready for offline use.")
