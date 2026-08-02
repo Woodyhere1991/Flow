@@ -14,19 +14,17 @@ either **verbatim** (keeping every "um", stutter and false start) or
 The installer gets Python, Flow's AI components, and the default speech model.
 After setup finishes, normal dictation works offline.
 
-### Easiest way
+### Installer temporarily unavailable
 
-1. Download [Flow Setup](https://github.com/Woodyhere1991/Flow/releases/latest/download/Flow-Setup.exe).
-2. Open **Flow-Setup.exe** from your Downloads folder.
-3. Follow the normal setup window. Flow appears on your Desktop when it is done.
-
-The installer is built from the public files in this repository. Its SHA-256
-checksum is published beside each release so the download can be verified.
+The first public installer was not digitally signed, so Windows showed
+**Unknown publisher**. It has been withdrawn rather than asking people to
+bypass a security warning. A normal one-click installer will return after it
+has a verified digital signature.
 
 An NVIDIA GPU is strongly recommended. Setup falls back to a CPU build
 automatically if there isn't one, but transcription is many times slower.
 
-If you prefer the ZIP version instead:
+For now, experienced users can inspect the public source and use the ZIP version:
 
 ```bash
 git clone <this-repo-url>
@@ -133,14 +131,10 @@ Double-click **Transcribe** on the Desktop, or `Transcribe.bat` in this folder.
 - **Choose audio file** — transcribe a file instead.
 - **Save as .txt** / **Copy** — get the text out.
 
-The first transcription of each session takes ~1 minute while the model loads
-into the GPU. Every one after that is fast.
+The first transcription of each session takes longer while the model loads
+into memory. Every one after that is faster.
 
 ## Microphone setup
-
-As of 2026-08-02 this PC has **no working microphone**. It's a desktop with no
-built-in mic, and the only input Windows can see is the **ULT WEAR Bluetooth
-headset**, which was in the wrong mode.
 
 Bluetooth headsets run in one of two modes, and only one of them has a mic:
 
@@ -149,10 +143,10 @@ Bluetooth headsets run in one of two modes, and only one of them has a mic:
 | A2DP / Stereo | High | No |
 | Hands-Free (HFP) | Noticeably worse | Yes |
 
-To switch: **Settings → System → Sound → Input**, and pick the ULT WEAR
-*Hands-Free* entry. Then hit **Refresh** in the app. Audio playback will sound
-worse while it's in this mode — that's a limitation of Bluetooth itself, not
-this app.
+To switch, open **Settings > System > Sound > Input**, choose the headset's
+*Hands-Free* entry, then select **Refresh** in Flow. Audio playback will sound
+worse while it is in this mode; that is a Bluetooth limitation, not a Flow
+problem.
 
 Any cheap USB microphone or webcam would sidestep the whole issue and sound
 better, if you plan to do this often.
