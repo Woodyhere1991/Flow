@@ -251,9 +251,14 @@ class Dictation:
         head_actions = tk.Frame(head, bg=ui.BG)
         head_actions.pack(side="right", pady=(5, 0))
         ui.Button(head_actions, "Personalize", self._open_personalize,
-                  width=120, bg=ui.BG).pack(side="left")
+                  width=120, bg=ui.BG,
+                  help_text=("Check your microphone and teach Flow how to "
+                             "write names, emails, and special phrases.")).pack(side="left")
         ui.Button(head_actions, "Settings", self._open_settings,
-                  width=95, bg=ui.BG).pack(side="left", padx=(8, 0))
+                  width=95, bg=ui.BG,
+                  help_text=("Choose how Flow writes, its speed and accuracy, "
+                             "and what happens when Windows starts.")).pack(
+                                 side="left", padx=(8, 0))
 
         live = ui.Card(wrap)
         live.pack(fill="x", pady=(16, 12))
@@ -272,6 +277,8 @@ class Dictation:
         self.talk_button = ui.Button(
             live.body, "Start talking", self._toggle_main_recording,
             primary=True, width=220, height=46,
+            help_text=("Start listening through your microphone. Click again "
+                       "to stop and turn your speech into text."),
         )
         self.talk_button.pack(anchor="w", padx=18)
 
@@ -329,11 +336,19 @@ class Dictation:
         row = tk.Frame(wrap, bg=ui.BG)
         row.pack(fill="x", pady=(10, 0))
         ui.Button(row, "Copy text", self._copy_last, primary=True,
-                  width=115, bg=ui.BG).pack(side="left")
+                  width=115, bg=ui.BG,
+                  help_text="Copy your latest dictated text so you can paste it elsewhere.").pack(side="left")
         ui.Button(row, "Fix text", self._correct_last,
-                  width=100, bg=ui.BG).pack(side="left", padx=8)
+                  width=100, bg=ui.BG,
+                  help_text=("Correct the latest dictation. Flow can remember "
+                             "a simple spelling correction.")).pack(side="left", padx=8)
         ui.Button(row, "Undo typing", self._undo_last,
-                  width=110, bg=ui.BG).pack(side="left")
+                  width=110, bg=ui.BG,
+                  help_text="Remove the last text Flow typed into another app.").pack(side="left")
+        tk.Label(
+            wrap, text="Tip: Point at any button to see what it does.",
+            bg=ui.BG, fg=ui.MUTED, font=(ui.FONT, 8), anchor="w",
+        ).pack(fill="x", pady=(5, 0))
 
         # Kept so existing code that writes to self.meter keeps working.
         self.meter = tk.Label(wrap, bg=ui.BG, fg=ui.BG, text="")
@@ -349,7 +364,7 @@ class Dictation:
             tk.Label(words, text=description, bg=ui.CARD, fg=ui.MUTED,
                      font=(ui.FONT, 8), anchor="w", justify="left",
                      wraplength=ui.s(360)).pack(fill="x", pady=(2, 0))
-        ui.Toggle(row, var).pack(side="right")
+        ui.Toggle(row, var, help_text=description or label).pack(side="right")
 
     def _open_settings(self):
         if self.settings_window and self.settings_window.winfo_exists():
@@ -389,6 +404,8 @@ class Dictation:
             writing.body, MODES, self.text_mode, width=300,
             command=self._mode_changed,
             labels={"intended": "Clean", "verbatim": "Word for word"},
+            help_text=("Choose Clean for tidy everyday writing, or Word for "
+                       "word to keep fillers, pauses, and spoken sounds."),
         )
         self.seg.pack(padx=14, anchor="w")
         self.mode_hint = tk.Label(
@@ -412,6 +429,8 @@ class Dictation:
                     "Recommended" if self.recommended_size == "small" else "Fastest"),
                 "large": "Most accurate",
             },
+            help_text=("Choose the speech model. Recommended suits this "
+                       "computer; other choices trade speed for accuracy."),
         ).pack(padx=14, anchor="w")
         self.size_hint = tk.Label(
             accuracy.body, bg=ui.CARD, fg=ui.MUTED, font=(ui.FONT, 8),
@@ -432,7 +451,9 @@ class Dictation:
             "Flow will be ready whenever you sign in.")
 
         ui.Button(wrap, "Done", self._close_settings, primary=True,
-                  width=100, bg=ui.BG).pack(anchor="w", pady=(2, 0))
+                  width=100, bg=ui.BG,
+                  help_text="Save these settings and return to Flow.").pack(
+                      anchor="w", pady=(2, 0))
         win.protocol("WM_DELETE_WINDOW", self._close_settings)
 
     def _close_settings(self):
@@ -633,6 +654,10 @@ class Dictation:
             font=(ui.FONT, 9, "bold"), cursor="hand2", padx=12, pady=6,
         )
         self.voice_check_btn.pack(anchor="w", padx=14, pady=(0, 12))
+        ui.Tooltip(
+            self.voice_check_btn,
+            "Record a short sample to check whether Flow can hear you clearly.",
+        )
 
         teach = ui.Card(wrap)
         teach.pack(fill="both", expand=True)
@@ -650,6 +675,8 @@ class Dictation:
         ui.Button(
             teach.body, "Fix latest dictation", self._correct_from_personalize,
             primary=True, width=155,
+            help_text=("Open your latest dictation, correct it once, and let "
+                       "Flow remember a simple change."),
         ).pack(anchor="w", padx=14, pady=(0, 4))
         latest_help = (
             "Ready to fix your latest dictation."
@@ -691,9 +718,11 @@ class Dictation:
         phrase_actions = tk.Frame(teach.body, bg=ui.CARD)
         phrase_actions.pack(fill="x", padx=14, pady=(7, 7))
         ui.Button(phrase_actions, "Save word", self._save_personal_phrase,
-                  primary=True, width=110).pack(side="left")
+                  primary=True, width=110,
+                  help_text="Save the phrase in both boxes for future dictations.").pack(side="left")
         ui.Button(phrase_actions, "Remove selected", self._remove_personal_phrase,
-                  width=140).pack(side="left", padx=8)
+                  width=140,
+                  help_text="Delete the highlighted saved phrase from Flow.").pack(side="left", padx=8)
 
         self.phrase_list = tk.Listbox(
             teach.body, bg="#101014", fg=ui.TEXT, selectbackground=ui.ACCENT,
@@ -704,7 +733,9 @@ class Dictation:
         self._refresh_personal_phrases()
 
         ui.Button(wrap, "Done", self._close_personalize, primary=True,
-                  width=100, bg=ui.BG).pack(anchor="w", pady=(10, 0))
+                  width=100, bg=ui.BG,
+                  help_text="Close Personalize and return to Flow.").pack(
+                      anchor="w", pady=(10, 0))
 
         win.protocol("WM_DELETE_WINDOW", self._close_personalize)
 
@@ -997,9 +1028,13 @@ class Dictation:
             self._set_state(message, "#080")
 
         ui.Button(actions, "Save correction", save, primary=True,
-                  width=125, bg=ui.BG).pack(side="left")
+                  width=125, bg=ui.BG,
+                  help_text=("Use this corrected text and remember a simple "
+                             "spelling change when possible.")).pack(side="left")
         ui.Button(actions, "Cancel", win.destroy,
-                  width=85, bg=ui.BG).pack(side="left", padx=8)
+                  width=85, bg=ui.BG,
+                  help_text="Close this window without changing the text.").pack(
+                      side="left", padx=8)
 
     # -------------------------------------------------------------- model ----
     def _load_model(self, size):

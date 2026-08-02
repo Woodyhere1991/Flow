@@ -104,9 +104,11 @@ class App:
 
         self.rec_btn = ttk.Button(mrow, text="Start recording", command=self.toggle_record)
         self.rec_btn.pack(side="left")
+        ui.Tooltip(self.rec_btn, "Start recording from the selected microphone. Click again to stop.")
 
         self.test_btn = ttk.Button(mrow, text="Test mic", command=self.toggle_test)
         self.test_btn.pack(side="left", padx=6)
+        ui.Tooltip(self.test_btn, "Listen briefly and show whether the selected microphone works.")
 
         self.rec_status = ttk.Label(mrow, text="", foreground="#666")
         self.rec_status.pack(side="left", padx=12)
@@ -119,7 +121,10 @@ class App:
         self.device_box = ttk.Combobox(drow, textvariable=self.device_var,
                                        state="readonly", width=48)
         self.device_box.pack(side="left", padx=6)
-        ttk.Button(drow, text="Refresh", command=self.refresh_devices).pack(side="left")
+        ui.Tooltip(self.device_box, "Choose which connected microphone Flow should use.")
+        refresh_btn = ttk.Button(drow, text="Refresh", command=self.refresh_devices)
+        refresh_btn.pack(side="left")
+        ui.Tooltip(refresh_btn, "Look again for microphones that were just connected.")
 
         # --- file -----------------------------------------------------------
         filef = ttk.LabelFrame(self.root, text="Or transcribe a file")
@@ -130,6 +135,7 @@ class App:
 
         self.pick_btn = ttk.Button(frow, text="Choose audio file...", command=self.pick_file)
         self.pick_btn.pack(side="left")
+        ui.Tooltip(self.pick_btn, "Choose a saved audio or video file to turn into text.")
 
         self.file_label = ttk.Label(frow, text="No file selected", foreground="#666")
         self.file_label.pack(side="left", padx=12)
@@ -147,17 +153,26 @@ class App:
                            state="readonly", width=9)
         box.pack(side="left", padx=(6, 4))
         box.bind("<<ComboboxSelected>>", self._update_model_hint)
+        ui.Tooltip(box, "Choose a faster or more accurate speech model.")
 
         self.model_hint = ttk.Label(row, text=MODEL_HELP["large"], foreground="#666")
         self.model_hint.pack(side="left", padx=(0, 20))
 
         ttk.Label(row, text="Language:").pack(side="left")
         self.lang_var = tk.StringVar(value="en")
-        ttk.Combobox(row, textvariable=self.lang_var, values=LANGUAGES,
-                     state="readonly", width=7).pack(side="left", padx=6)
+        language_box = ttk.Combobox(
+            row, textvariable=self.lang_var, values=LANGUAGES,
+            state="readonly", width=7,
+        )
+        language_box.pack(side="left", padx=6)
+        ui.Tooltip(language_box, "Choose the language in the recording, or use auto to detect it.")
 
         self.ts_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(row, text="Word timings", variable=self.ts_var).pack(side="left", padx=20)
+        timings_btn = ttk.Checkbutton(
+            row, text="Word timings", variable=self.ts_var,
+        )
+        timings_btn.pack(side="left", padx=20)
+        ui.Tooltip(timings_btn, "Include the start and end time for each transcribed word.")
 
         # --- actions --------------------------------------------------------
         actions = ttk.Frame(self.root)
@@ -166,14 +181,17 @@ class App:
         self.go_btn = ttk.Button(actions, text="Transcribe file",
                                  command=self.start_transcribe_file, state="disabled")
         self.go_btn.pack(side="left")
+        ui.Tooltip(self.go_btn, "Turn the selected audio file into written text.")
 
         self.save_btn = ttk.Button(actions, text="Save as .txt",
                                    command=self.save_text, state="disabled")
         self.save_btn.pack(side="left", padx=8)
+        ui.Tooltip(self.save_btn, "Save the finished transcription as a text file.")
 
         self.copy_btn = ttk.Button(actions, text="Copy", command=self.copy_text,
                                    state="disabled")
         self.copy_btn.pack(side="left")
+        ui.Tooltip(self.copy_btn, "Copy the finished transcription so you can paste it elsewhere.")
 
         self.progress = ttk.Progressbar(self.root, mode="indeterminate")
         self.progress.pack(fill="x", padx=12)
