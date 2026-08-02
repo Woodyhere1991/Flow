@@ -577,8 +577,9 @@ class Dictation:
         self.personalize_window = win
         win.title("Welcome to Flow" if first_run else "Personalize Flow")
         win.configure(bg=ui.BG)
-        win.geometry(f"{ui.s(520)}x{ui.s(640)}")
-        win.minsize(ui.s(480), ui.s(590))
+        w, h = ui.fit_to_screen(win, ui.s(540), ui.s(700), margin=100)
+        win.geometry(f"{w}x{h}")
+        win.minsize(min(ui.s(490), w), min(ui.s(640), h))
         win.transient(self.root)
         ui.dark_titlebar(win)
         icon = Path(__file__).with_name("icon.ico")
@@ -592,7 +593,7 @@ class Dictation:
             "Two quick, optional steps help Flow understand you. "
             "You can change these later."
             if first_run else
-            "Check your microphone or teach Flow names, emails, and phrases."
+            "Check your microphone and let Flow learn from your corrections."
         )
         tk.Label(wrap, text=heading, bg=ui.BG, fg=ui.TEXT,
                  font=(ui.FONT, 18, "bold"), anchor="w").pack(fill="x")
@@ -635,16 +636,38 @@ class Dictation:
 
         teach = ui.Card(wrap)
         teach.pack(fill="both", expand=True)
-        tk.Label(teach.body, text="2. TEACH FLOW A WORD (OPTIONAL)",
+        tk.Label(teach.body, text="2. LET FLOW LEARN AUTOMATICALLY",
                  bg=ui.CARD, fg=ui.ACCENT_2,
                  font=(ui.FONT, 8, "bold"), anchor="w").pack(
                      fill="x", padx=14, pady=(12, 3))
         tk.Label(
             teach.body,
-            text="Use this for a name, email, or phrase Flow may spell incorrectly.",
+            text=("After Flow gets something wrong, fix the latest dictation once. "
+                  "Flow remembers a simple spelling change for next time."),
             bg=ui.CARD, fg=ui.MUTED, font=(ui.FONT, 8), anchor="w",
             wraplength=ui.s(450), justify="left",
         ).pack(fill="x", padx=14, pady=(0, 7))
+        ui.Button(
+            teach.body, "Fix latest dictation", self._correct_from_personalize,
+            primary=True, width=155,
+        ).pack(anchor="w", padx=14, pady=(0, 4))
+        latest_help = (
+            "Ready to fix your latest dictation."
+            if self.last_text else
+            "Nothing to fix yet. Dictate normally, then come back here."
+        )
+        self.learn_status = tk.Label(
+            teach.body, text=latest_help, bg=ui.CARD, fg=ui.MUTED,
+            font=(ui.FONT, 8), anchor="w",
+        )
+        self.learn_status.pack(fill="x", padx=14, pady=(0, 9))
+
+        tk.Frame(teach.body, bg=ui.LINE, height=1).pack(
+            fill="x", padx=14, pady=(0, 9))
+        tk.Label(teach.body, text="ADD A SPECIAL PHRASE MANUALLY (OPTIONAL)",
+                 bg=ui.CARD, fg=ui.MUTED,
+                 font=(ui.FONT, 8, "bold"), anchor="w").pack(
+                     fill="x", padx=14, pady=(0, 5))
         tk.Label(teach.body, text="If Flow hears:", bg=ui.CARD, fg=ui.TEXT,
                  font=(ui.FONT, 8), anchor="w").pack(fill="x", padx=14)
         self.heard_entry = tk.Entry(
@@ -698,6 +721,16 @@ class Dictation:
         self.phrase_list.delete(0, "end")
         for spoken, written in sorted(self.spoken_replacements.items()):
             self.phrase_list.insert("end", f"{spoken}  ->  {written}")
+
+    def _correct_from_personalize(self):
+        """Open the normal one-step correction flow from Personalize."""
+        if not self.last_text:
+            self.learn_status.config(
+                text="Dictate something first, then click this button.",
+                fg=ui.WARN,
+            )
+            return
+        self._correct_last()
 
     def _save_personal_phrase(self):
         spoken = self.heard_entry.get().strip()
@@ -950,6 +983,13 @@ class Dictation:
 
             if learned:
                 message = f'Remembered: "{learned[0]}" -> "{learned[1]}"'
+                if (hasattr(self, "learn_status")
+                        and self.learn_status.winfo_exists()):
+                    self.learn_status.config(
+                        text=(f'Learned "{learned[0]}" -> '
+                              f'"{learned[1]}".'),
+                        fg=ui.GOOD,
+                    )
             elif replaced:
                 message = "Corrected the last dictation"
             else:

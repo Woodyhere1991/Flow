@@ -75,10 +75,12 @@ connected** when you try to listen. Connect a microphone and try again.
 If you connect a headset while Flow is already open, it notices automatically
 and changes to **Microphone connected - ready to listen**.
 
-Click **Personalize Flow** to check your microphone or teach names, email
-addresses, and phrases. Click **Fix text** to correct the latest result and
-remember a simple spelling change. Click **Undo typing** within 30 seconds to
-remove the most recent dictation.
+Click **Personalize Flow**, then **Fix latest dictation** after Flow gets a word
+wrong. Correct it once and save it. Flow automatically remembers a simple
+spelling change for next time, so you do not need to fill in both manual boxes.
+The manual boxes are still available for special names, email addresses, and
+phrases. Click **Undo typing** within 30 seconds to remove the most recent
+dictation.
 
 Personal rules stay in `%LOCALAPPDATA%\Flow\settings.json`, outside OneDrive
 and outside the project folder. They are not uploaded to GitHub. The text is
