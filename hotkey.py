@@ -197,6 +197,8 @@ class Dictation:
         self.spoken_replacements = (
             saved_replacements if isinstance(saved_replacements, dict) else {}
         )
+        self.input_device_name = str(saved.get("input_device_name", ""))
+        self.input_hostapi = str(saved.get("input_hostapi", ""))
         self.setup_seen = bool(saved.get("setup_seen", False))
         self.hardware_warning_seen = bool(
             saved.get("hardware_warning_seen", False))
@@ -572,6 +574,8 @@ class Dictation:
                 "mode": self.text_mode.get(),
                 "show_overlay": self.show_overlay.get(),
                 "size": self.size.get(),
+                "input_device_name": self.input_device_name,
+                "input_hostapi": self.input_hostapi,
                 "spoken_replacements": self.spoken_replacements,
                 "setup_seen": self.setup_seen,
                 "hardware_warning_seen": self.hardware_warning_seen,
@@ -1072,8 +1076,11 @@ class Dictation:
         try:
             if self._microphone_active():
                 return True
-            self.stream = sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
-                                         callback=cb, latency="low")
+            device = self._preferred_input_device()
+            self.stream = sd.InputStream(
+                samplerate=RATE, channels=1, dtype="float32",
+                callback=cb, latency="low", device=device,
+            )
             self.stream.start()
             self.mic_error = None
             return True
@@ -1083,10 +1090,28 @@ class Dictation:
             self.events.put(("state", ("No microphone connected", "#b00")))
             return False
 
-    def _input_device_connected(self):
-        """Return whether Windows currently has a usable default microphone."""
+    def _preferred_input_device(self):
+        """Resolve a saved microphone by stable name and Windows audio system."""
+        if not self.input_device_name or not self.input_hostapi:
+            return None
         try:
-            device = sd.query_devices(kind="input")
+            for index, device in enumerate(sd.query_devices()):
+                if int(device.get("max_input_channels", 0)) < 1:
+                    continue
+                host = sd.query_hostapis(device["hostapi"])["name"]
+                if (self.input_device_name.casefold() in device["name"].casefold()
+                        and host.casefold() == self.input_hostapi.casefold()):
+                    return index
+        except Exception:
+            pass
+        return None
+
+    def _input_device_connected(self):
+        """Return whether Windows currently has a usable microphone."""
+        try:
+            preferred = self._preferred_input_device()
+            device = sd.query_devices(preferred, "input") if preferred is not None \
+                else sd.query_devices(kind="input")
             return int(device.get("max_input_channels", 0)) > 0
         except Exception:
             return False
