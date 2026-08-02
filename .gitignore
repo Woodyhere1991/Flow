@@ -14,6 +14,9 @@ settings.json
 # Audio scratch files
 *.wav
 
+# Local installer build output
+dist/
+
 # Generated icon - make_icon.py rebuilds it, but keep it committed so the
 # shortcuts work before anyone runs the generator
 icon.png
