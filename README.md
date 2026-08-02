@@ -15,11 +15,12 @@ if it is not already on the computer.
 
 ### Easiest way
 
-1. Download [Flow Setup](https://github.com/Woodyhere1991/Flow/releases/latest/download/Flow-Setup.cmd).
-2. Open **Flow-Setup.cmd** from your Downloads folder.
-3. Setup starts on its own and puts **Flow** on your Desktop.
+1. Download [Flow](https://github.com/Woodyhere1991/Flow/archive/refs/heads/master.zip).
+2. Open the downloaded ZIP and choose **Extract all**.
+3. Open the extracted folder and double-click **Install Flow.bat**.
 
-You do not need to find anything inside a ZIP folder.
+This is the safe Windows download method. A web link cannot safely start an
+installer by itself without triggering security warnings.
 
 An NVIDIA GPU is strongly recommended. Setup falls back to a CPU build
 automatically if there isn't one, but transcription is many times slower.
