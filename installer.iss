@@ -1,5 +1,5 @@
 #define MyAppName "Flow"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.0.1"
 #define MyAppPublisher "Woodyhere1991"
 #define MyAppURL "https://github.com/Woodyhere1991/Flow"
 
@@ -36,6 +36,7 @@ Source: "wintext.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "make_icon.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "prepare_offline.py"; DestDir: "{app}"; Flags: ignoreversion
 Source: "requirements.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "constraints.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "setup.bat"; DestDir: "{app}"; Flags: ignoreversion
 Source: "icon.ico"; DestDir: "{app}"; Flags: ignoreversion; AfterInstall: InstallDependencies
 

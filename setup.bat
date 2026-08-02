@@ -95,19 +95,26 @@ if errorlevel 1 goto :fail
 
 rem ---- torch -----------------------------------------------------------------
 echo   [4/6] Installing PyTorch ^(about 2.5 GB, this takes a while^)...
+set "HAS_NVIDIA="
 where nvidia-smi >nul 2>nul
-if errorlevel 1 (
+if not errorlevel 1 set "HAS_NVIDIA=1"
+rem Inno Setup is a 32-bit process, so System32 can be redirected to SysWOW64.
+rem Sysnative reliably exposes the real 64-bit NVIDIA utility in that case.
+if exist "%SystemRoot%\System32\nvidia-smi.exe" set "HAS_NVIDIA=1"
+if exist "%SystemRoot%\Sysnative\nvidia-smi.exe" set "HAS_NVIDIA=1"
+if not defined HAS_NVIDIA (
   echo         No NVIDIA GPU detected - installing the CPU build.
   echo         Flow will still work, but transcription will be much slower.
-  "%VPY%" -m pip install torch torchaudio
+  "%VPY%" -m pip install torch==2.6.0 torchaudio==2.6.0
 ) else (
   echo         NVIDIA GPU detected - installing the CUDA build.
-  "%VPY%" -m pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu124
+  "%VPY%" -m pip install torch==2.6.0 torchaudio==2.6.0 --index-url https://download.pytorch.org/whl/cu124
 )
 if errorlevel 1 goto :fail
 
 echo   [5/6] Installing everything else...
-"%VPY%" -m pip install -r requirements.txt
+rem Keep third-party packages from replacing the matching CUDA/CPU PyTorch pair.
+"%VPY%" -m pip install -r requirements.txt --constraint constraints.txt
 if errorlevel 1 goto :fail
 
 echo   [6/6] Downloading the speech model for offline use...

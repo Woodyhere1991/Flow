@@ -1,0 +1,5 @@
+# Keep torch and torchaudio on the exact matching release installed by setup.bat.
+# Without this constraint, a dependency may upgrade only torchaudio and break
+# transcription with Windows error 127.
+torch==2.6.0
+torchaudio==2.6.0
