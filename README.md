@@ -10,17 +10,18 @@ either **verbatim** (keeping every "um", stutter and false start) or
 
 ## Install on another PC
 
-**You need:** Windows 10 or 11. The installer can install Python automatically
-if it is not already on the computer.
+**You need:** Windows 10 or 11 and an internet connection while setup runs.
+The installer gets Python, Flow's AI components, and the default speech model.
+After setup finishes, normal dictation works offline.
 
 ### Easiest way
 
-1. Download [Flow](https://github.com/Woodyhere1991/Flow/archive/refs/heads/master.zip).
-2. Open the downloaded ZIP and choose **Extract all**.
-3. Open the extracted folder and double-click **Install Flow.bat**.
+1. Download [Flow Setup](https://github.com/Woodyhere1991/Flow/releases/latest/download/Flow-Setup.exe).
+2. Open **Flow-Setup.exe** from your Downloads folder.
+3. Follow the normal setup window. Flow appears on your Desktop when it is done.
 
-This is the safe Windows download method. A web link cannot safely start an
-installer by itself without triggering security warnings.
+The installer is built from the public files in this repository. Its SHA-256
+checksum is published beside each release so the download can be verified.
 
 An NVIDIA GPU is strongly recommended. Setup falls back to a CPU build
 automatically if there isn't one, but transcription is many times slower.
@@ -36,8 +37,7 @@ environment, installs everything (about 3 GB of downloads), generates the icon
 and puts a **Flow** shortcut on the Desktop. It takes 5–15 minutes depending on
 your connection.
 
-The speech model (~1 GB) downloads by itself the first time you run Flow, so
-the first launch is slower than the ones after it.
+The default speech model downloads during setup, not on first launch.
 
 **Windows only.** Typing into other apps uses Win32 APIs (`SendInput`,
 clipboard, foreground-window handling) that have no macOS or Linux equivalent

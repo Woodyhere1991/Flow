@@ -1,6 +1,7 @@
 @echo off
 setlocal EnableExtensions
 set "SOURCE_DIR=%~dp0"
+set "SOURCE_DIR_TRIMMED=%SOURCE_DIR:~0,-1%"
 set "APP_DIR=%LOCALAPPDATA%\Flow\app"
 cd /d "%SOURCE_DIR%"
 
@@ -18,10 +19,12 @@ if /i "%~1"=="--check" (
 )
 
 rem ---- keep the running app in a permanent local folder ---------------------
-echo   [1/5] Preparing Flow...
+echo   [1/6] Preparing Flow...
+if /i "%SOURCE_DIR_TRIMMED%"=="%APP_DIR%" goto :copy_done
 if not exist "%APP_DIR%" mkdir "%APP_DIR%"
 robocopy "%SOURCE_DIR%" "%APP_DIR%" /E /R:1 /W:1 /XD venv .git __pycache__ /XF settings.json *.wav *.mp3 *.m4a >nul
 if errorlevel 8 goto :fail
+:copy_done
 cd /d "%APP_DIR%"
 
 rem ---- find or install Python ------------------------------------------------
@@ -76,7 +79,7 @@ if errorlevel 1 (
   exit /b 1
 )
 
-echo   [2/5] Creating the virtual environment...
+echo   [2/6] Creating the virtual environment...
 if not exist venv (
   "%PY_CMD%" %PY_ARGS% -m venv venv
   if errorlevel 1 goto :fail
@@ -86,12 +89,12 @@ if not exist venv (
 
 set VPY=venv\Scripts\python.exe
 
-echo   [3/5] Updating pip...
+echo   [3/6] Updating pip...
 "%VPY%" -m pip install --quiet --upgrade pip
 if errorlevel 1 goto :fail
 
 rem ---- torch -----------------------------------------------------------------
-echo   [4/5] Installing PyTorch ^(about 2.5 GB, this takes a while^)...
+echo   [4/6] Installing PyTorch ^(about 2.5 GB, this takes a while^)...
 where nvidia-smi >nul 2>nul
 if errorlevel 1 (
   echo         No NVIDIA GPU detected - installing the CPU build.
@@ -103,8 +106,12 @@ if errorlevel 1 (
 )
 if errorlevel 1 goto :fail
 
-echo   [5/5] Installing everything else...
+echo   [5/6] Installing everything else...
 "%VPY%" -m pip install -r requirements.txt
+if errorlevel 1 goto :fail
+
+echo   [6/6] Downloading the speech model for offline use...
+"%VPY%" prepare_offline.py
 if errorlevel 1 goto :fail
 
 rem ---- icon + shortcut -------------------------------------------------------
@@ -124,14 +131,13 @@ powershell -NoProfile -Command ^
 echo.
 echo   Done. Launch "Flow" from your Desktop.
 echo.
-echo   The speech model ^(about 1 GB^) downloads automatically the first time
-echo   you run it, so the first launch is slower than later ones.
+echo   Setup has downloaded everything needed for normal offline dictation.
 echo.
-pause
+if /i not "%~1"=="--installed" pause
 exit /b 0
 
 :fail
 echo.
 echo   Setup failed - see the messages above.
-pause
+if /i not "%~1"=="--installed" pause
 exit /b 1
