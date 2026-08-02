@@ -1,0 +1,19 @@
+# Virtual environment - ~4.7 GB, rebuilt by setup.bat
+venv/
+
+# Local editor/agent config, not part of the app
+.claude/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Legacy per-machine settings (new versions keep these in LocalAppData)
+settings.json
+
+# Audio scratch files
+*.wav
+
+# Generated icon - make_icon.py rebuilds it, but keep it committed so the
+# shortcuts work before anyone runs the generator
+icon.png

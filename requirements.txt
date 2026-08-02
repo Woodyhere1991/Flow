@@ -1,0 +1,19 @@
+# Installed by setup.bat.
+#
+# torch is NOT listed here: it must come from PyTorch's own index so you get
+# the CUDA build rather than the CPU-only one from PyPI. setup.bat installs it
+# separately with --index-url.
+
+crisperwhisper[transformers]==2.0.1
+
+# crisperwhisper/hallucination.py imports ctranslate2 unconditionally at module
+# level, even on the PyTorch backend, so it must be present or transcription
+# crashes. The CT2 *backend* is still unused on Windows - see README.
+ctranslate2==4.8.1
+
+sounddevice>=0.5          # microphone capture
+soundfile>=0.12           # wav read/write
+pynput>=1.8               # global Ctrl+Win hotkey
+comtypes>=1.4             # UI Automation (focused-field detection)
+pillow>=10                # icon generation
+numpy>=1.26
