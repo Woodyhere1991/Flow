@@ -29,7 +29,7 @@ import time
 import tkinter as tk
 from collections import deque
 from pathlib import Path
-from tkinter import ttk
+from tkinter import messagebox, ttk
 
 import numpy as np
 import sounddevice as sd
@@ -43,6 +43,7 @@ APP_DATA_DIR = Path(os.environ.get(
     "LOCALAPPDATA", str(Path.home() / "AppData" / "Local")
 )) / "Flow"
 SETTINGS_PATH = APP_DATA_DIR / "settings.json"
+HARDWARE_PATH = APP_DATA_DIR / "hardware.json"
 LEGACY_SETTINGS_PATH = Path(__file__).with_name("settings.json")
 
 RATE = 16000
@@ -132,7 +133,7 @@ MODE_HELP = {
 # with no visible quality difference on dictation-length clips.
 SIZES = ("turbo", "small", "large")
 SIZE_HELP = {
-    "turbo": "Recommended - fast and accurate on this computer.",
+    "turbo": "Fast and accurate when NVIDIA acceleration is available.",
     "small": "Fastest, but may make a few more mistakes.",
     "large": "Most accurate, but takes longer.",
 }
@@ -186,16 +187,27 @@ class Dictation:
         self.settings_window = None
         self.record_to_flow = False
 
+        self.hardware_profile = self._load_hardware_profile()
+        recommended = self.hardware_profile.get("recommended_model", "turbo")
+        self.recommended_size = recommended if recommended in SIZES else "turbo"
+        self.hardware_warning = self.hardware_profile.get("warning", "")
+
         saved = self._load_settings()
         saved_replacements = saved.get("spoken_replacements", {})
         self.spoken_replacements = (
             saved_replacements if isinstance(saved_replacements, dict) else {}
         )
         self.setup_seen = bool(saved.get("setup_seen", False))
+        self.hardware_warning_seen = bool(
+            saved.get("hardware_warning_seen", False))
+        self.hardware_choice_confirmed = bool(
+            saved.get("hardware_choice_confirmed", False))
         self.auto_paste = tk.BooleanVar(value=saved.get("auto_paste", True))
         self.text_mode = tk.StringVar(value=saved.get("mode", "intended"))
         self.show_overlay = tk.BooleanVar(value=saved.get("show_overlay", True))
-        self.size = tk.StringVar(value=saved.get("size", "turbo"))
+        saved_size = saved.get("size", self.recommended_size)
+        self.size = tk.StringVar(
+            value=saved_size if saved_size in SIZES else self.recommended_size)
         self.at_startup = tk.BooleanVar(value=STARTUP_LINK.exists())
         for var in (self.auto_paste, self.text_mode, self.show_overlay, self.size):
             var.trace_add("write", lambda *_: self._save_settings())
@@ -205,6 +217,7 @@ class Dictation:
 
         self._build_ui()
         self.root.after(80, self._drain)
+        self.root.after(500, self._maybe_warn_hardware)
         self.root.after(1200, self._maybe_open_setup)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -231,6 +244,10 @@ class Dictation:
                  font=(ui.FONT, 21, "bold"), anchor="w").pack(anchor="w")
         tk.Label(brand, text="Private voice typing", bg=ui.BG, fg=ui.MUTED,
                  font=(ui.FONT, 9), anchor="w").pack(anchor="w")
+        hardware_text, hardware_colour = self._hardware_status()
+        if hardware_text:
+            tk.Label(brand, text=hardware_text, bg=ui.BG, fg=hardware_colour,
+                     font=(ui.FONT, 8, "bold"), anchor="w").pack(anchor="w")
         head_actions = tk.Frame(head, bg=ui.BG)
         head_actions.pack(side="right", pady=(5, 0))
         ui.Button(head_actions, "Personalize", self._open_personalize,
@@ -358,7 +375,7 @@ class Dictation:
                  font=(ui.FONT, 18, "bold"), anchor="w").pack(fill="x")
         tk.Label(
             wrap,
-            text="Flow is already set up. Change these only if you want to.",
+            text=self._settings_intro(),
             bg=ui.BG, fg=ui.MUTED, font=(ui.FONT, 9), anchor="w",
             wraplength=ui.s(450), justify="left",
         ).pack(fill="x", pady=(3, 14))
@@ -389,14 +406,16 @@ class Dictation:
             accuracy.body, SIZES, self.size, width=330,
             command=self._size_changed,
             labels={
-                "turbo": "Recommended",
-                "small": "Fastest",
+                "turbo": (
+                    "Recommended" if self.recommended_size == "turbo" else "Turbo"),
+                "small": (
+                    "Recommended" if self.recommended_size == "small" else "Fastest"),
                 "large": "Most accurate",
             },
         ).pack(padx=14, anchor="w")
         self.size_hint = tk.Label(
             accuracy.body, bg=ui.CARD, fg=ui.MUTED, font=(ui.FONT, 8),
-            anchor="w", text=SIZE_HELP[self.size.get()],
+            anchor="w", text=self._size_help(self.size.get()),
         )
         self.size_hint.pack(fill="x", padx=16, pady=(6, 11))
 
@@ -425,7 +444,9 @@ class Dictation:
         self.mode_hint.config(text=MODE_HELP[self.text_mode.get()])
 
     def _size_changed(self):
-        self.size_hint.config(text=SIZE_HELP[self.size.get()])
+        self.hardware_choice_confirmed = True
+        self._save_settings()
+        self.size_hint.config(text=self._size_help(self.size.get()))
         if getattr(self, "loaded_size", None) == self.size.get():
             return
         # Swap models in the background so the UI stays responsive.
@@ -475,6 +496,53 @@ class Dictation:
             except Exception:
                 return {}
 
+    def _load_hardware_profile(self):
+        try:
+            profile = json.loads(HARDWARE_PATH.read_text(encoding="utf-8"))
+            return profile if isinstance(profile, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
+
+    def _hardware_status(self):
+        performance = self.hardware_profile.get("performance")
+        if performance == "fast":
+            return "NVIDIA acceleration - fast mode", ui.GOOD
+        if performance == "constrained_gpu":
+            return "NVIDIA acceleration - Small model for limited memory", ui.WARN
+        if performance == "possibly_unusable":
+            return "CPU mode - Flow may not be useful", ui.REC
+        if performance == "slow":
+            return "CPU mode - transcription may be slow", ui.WARN
+        return "", ui.MUTED
+
+    def _settings_intro(self):
+        status, _colour = self._hardware_status()
+        if status:
+            return f"{status}. Flow recommends the {self.recommended_size} model."
+        return "Flow is already set up. Change these only if you want to."
+
+    def _size_help(self, size):
+        if size == self.recommended_size:
+            return f"Recommended for this computer. {SIZE_HELP[size]}"
+        if self.hardware_profile.get("device") == "cpu":
+            if size == "large":
+                return (
+                    "May be impractically slow without NVIDIA acceleration. "
+                    "It may need internet once to download.")
+            if size == "turbo":
+                return (
+                    "More demanding than Small and likely slower on this CPU. "
+                    "It may need internet once to download.")
+        return f"{SIZE_HELP[size]} It may need internet once to download."
+
+    def _maybe_warn_hardware(self):
+        if not self.hardware_warning or self.hardware_warning_seen:
+            return
+        self.hardware_warning_seen = True
+        self._save_settings()
+        messagebox.showwarning(
+            "Flow performance warning", self.hardware_warning, parent=self.root)
+
     def _save_settings(self):
         try:
             APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -485,6 +553,8 @@ class Dictation:
                 "size": self.size.get(),
                 "spoken_replacements": self.spoken_replacements,
                 "setup_seen": self.setup_seen,
+                "hardware_warning_seen": self.hardware_warning_seen,
+                "hardware_choice_confirmed": self.hardware_choice_confirmed,
             }, indent=2), encoding="utf-8")
         except Exception:
             pass  # a settings write failing should never break dictation
@@ -898,7 +968,9 @@ class Dictation:
         try:
             import torch
             from crisperwhisper import CrisperWhisperModel
-            device = "cuda" if torch.cuda.is_available() else "cpu"
+            profile_device = self.hardware_profile.get("device")
+            use_cuda = torch.cuda.is_available() and profile_device != "cpu"
+            device = "cuda" if use_cuda else "cpu"
             where = torch.cuda.get_device_name(0) if device == "cuda" else "CPU"
             self.events.put(("state", (f"Loading {size} on {where}...", "#c80")))
             # backend="transformers" is required on Windows - see README.
