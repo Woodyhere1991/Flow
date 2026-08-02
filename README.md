@@ -13,10 +13,18 @@ either **verbatim** (keeping every "um", stutter and false start) or
 **You need:** Windows 10 or 11. The installer can install Python automatically
 if it is not already on the computer.
 
+### Easiest way
+
+1. Download [Flow Setup](https://github.com/Woodyhere1991/Flow/releases/latest/download/Flow-Setup.cmd).
+2. Open **Flow-Setup.cmd** from your Downloads folder.
+3. Setup starts on its own and puts **Flow** on your Desktop.
+
+You do not need to find anything inside a ZIP folder.
+
 An NVIDIA GPU is strongly recommended. Setup falls back to a CPU build
 automatically if there isn't one, but transcription is many times slower.
 
-Then:
+If you prefer the ZIP version instead:
 
 ```bash
 git clone <this-repo-url>
