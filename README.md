@@ -84,6 +84,10 @@ connected but the signal is too quiet, Flow says so instead of guessing words.
 Click **Personalize Flow**, then **Fix latest dictation** after Flow gets a word
 wrong. Correct it once and save it. Flow automatically remembers a simple
 spelling change for next time, so you do not need to fill in both manual boxes.
+When the correction is one capitalised personal name, such as **Naki**, Flow
+also learns sensible sound-alike spellings. You teach the name once rather than
+adding every different spelling the speech model may produce. This matching is
+used only for names you deliberately teach and can be removed in Personalize.
 The manual boxes are still available for special names, email addresses, and
 phrases. Click **Undo typing** within 30 seconds to remove the most recent
 dictation.

@@ -76,10 +76,67 @@ IDLE, PTT, TOGGLE = "idle", "ptt", "toggle"
 NOISE_ONLY = re.compile(r"^\s*(\[[^\]]*\]|\([^)]*\)|[\s.,!?-])*\s*$")
 
 
-def apply_spoken_replacements(text, replacements):
-    """Apply private, user-defined corrections after transcription."""
+def phonetic_key(word):
+    """Return a small pronunciation key for user-taught names."""
+    letters = re.sub(r"[^a-z]", "", word.casefold())
+    if not letters:
+        return ""
+    if letters.startswith("kn"):
+        letters = letters[1:]
+    letters = (letters.replace("ph", "f").replace("ck", "k")
+               .replace("qu", "k").replace("q", "k"))
+    letters = re.sub(r"c(?=[eiy])", "s", letters)
+    letters = letters.replace("c", "k").replace("x", "ks")
+    first = letters[0]
+    consonants = first + "".join(
+        char for char in letters[1:] if char not in "aeiouy"
+    )
+    return re.sub(r"(.)\1+", r"\1", consonants)
+
+
+def is_personal_name(text):
+    """True for one deliberately capitalised name-like word."""
+    return bool(re.fullmatch(r"[A-Z][A-Za-z'-]{2,}", text.strip()))
+
+
+def apply_personal_names(text, personal_names):
+    """Canonicalise sound-alike spellings only for explicitly taught names."""
+    by_sound = {}
+    for name in personal_names or ():
+        if not isinstance(name, str) or not is_personal_name(name):
+            continue
+        key = phonetic_key(name)
+        if key:
+            by_sound.setdefault(key, []).append(name)
+
+    # Never guess when two taught names have the same sound.
+    unambiguous = {
+        key: names[0] for key, names in by_sound.items()
+        if len({name.casefold() for name in names}) == 1
+    }
+
+    def replace(match):
+        heard = match.group(0)
+        token_start = match.start()
+        token_end = match.end()
+        while token_start and not text[token_start - 1].isspace():
+            token_start -= 1
+        while token_end < len(text) and not text[token_end].isspace():
+            token_end += 1
+        if "@" in text[token_start:token_end]:
+            return heard
+        target = unambiguous.get(phonetic_key(heard))
+        if not target or abs(len(heard) - len(target)) > 2:
+            return heard
+        return target
+
+    return re.sub(r"\b[A-Za-z][A-Za-z'-]*\b", replace, text)
+
+
+def apply_spoken_replacements(text, replacements, personal_names=None):
+    """Apply private exact corrections and user-taught sound-alike names."""
     if not isinstance(replacements, dict):
-        return text
+        return apply_personal_names(text, personal_names)
 
     # Longer phrases go first so a short nickname cannot take part of a more
     # specific phrase. Whitespace is flexible because speech models sometimes
@@ -94,7 +151,7 @@ def apply_spoken_replacements(text, replacements):
         phrase = r"\s+".join(re.escape(word) for word in words)
         text = re.sub(rf"(?<!\w){phrase}(?!\w)", written, text,
                       flags=re.IGNORECASE)
-    return text
+    return apply_personal_names(text, personal_names)
 
 
 def extract_simple_correction(original, corrected):
@@ -198,6 +255,11 @@ class Dictation:
         self.spoken_replacements = (
             saved_replacements if isinstance(saved_replacements, dict) else {}
         )
+        saved_names = saved.get("personal_names", [])
+        self.personal_names = {
+            name for name in saved_names
+            if isinstance(name, str) and is_personal_name(name)
+        }
         self.input_device_name = str(saved.get("input_device_name", ""))
         self.input_hostapi = str(saved.get("input_hostapi", ""))
         self.setup_seen = bool(saved.get("setup_seen", False))
@@ -683,6 +745,7 @@ class Dictation:
                 "size": self.size.get(),
                 "input_device_name": self.input_device_name,
                 "input_hostapi": self.input_hostapi,
+                "personal_names": sorted(self.personal_names),
                 "spoken_replacements": self.spoken_replacements,
                 "setup_seen": self.setup_seen,
                 "hardware_warning_seen": self.hardware_warning_seen,
@@ -861,8 +924,22 @@ class Dictation:
                 or not self.phrase_list.winfo_exists()):
             return
         self.phrase_list.delete(0, "end")
+        self.phrase_items = []
+        for name in sorted(self.personal_names, key=str.casefold):
+            self.phrase_list.insert(
+                "end", f"{name}  (also matches similar spellings)")
+            self.phrase_items.append(("name", name))
         for spoken, written in sorted(self.spoken_replacements.items()):
             self.phrase_list.insert("end", f"{spoken}  ->  {written}")
+            self.phrase_items.append(("replacement", spoken))
+
+    def _remember_personal_correction(self, spoken, written):
+        """Save an exact correction and learn a corrected personal name."""
+        self.spoken_replacements[spoken] = written
+        learned_name = written if is_personal_name(written) else None
+        if learned_name:
+            self.personal_names.add(learned_name)
+        return learned_name
 
     def _correct_from_personalize(self):
         """Open the normal one-step correction flow from Personalize."""
@@ -881,13 +958,17 @@ class Dictation:
             self.phrase_status.config(
                 text="Fill in both boxes first.", fg=ui.WARN)
             return
-        self.spoken_replacements[spoken] = written
+        learned_name = self._remember_personal_correction(spoken, written)
         self._save_settings()
         self._refresh_personal_phrases()
         self.heard_entry.delete(0, "end")
         self.written_entry.delete(0, "end")
-        self.phrase_status.config(text="Saved. Flow will use it next time.",
-                                  fg=ui.GOOD)
+        if learned_name:
+            message = (f"Saved {learned_name}. Flow will also catch similar "
+                       "spellings.")
+        else:
+            message = "Saved. Flow will use it next time."
+        self.phrase_status.config(text=message, fg=ui.GOOD)
 
     def _remove_personal_phrase(self):
         selected = self.phrase_list.curselection()
@@ -895,8 +976,14 @@ class Dictation:
             self.phrase_status.config(
                 text="Click a saved phrase first.", fg=ui.WARN)
             return
-        spoken = sorted(self.spoken_replacements)[selected[0]]
-        self.spoken_replacements.pop(spoken, None)
+        if selected[0] >= len(getattr(self, "phrase_items", [])):
+            self._refresh_personal_phrases()
+            return
+        kind, value = self.phrase_items[selected[0]]
+        if kind == "name":
+            self.personal_names.discard(value)
+        else:
+            self.spoken_replacements.pop(value, None)
         self._save_settings()
         self._refresh_personal_phrases()
         self.phrase_status.config(text="Removed.", fg=ui.MUTED)
@@ -1102,8 +1189,9 @@ class Dictation:
                 return
 
             learned = extract_simple_correction(original, corrected)
+            learned_name = None
             if learned:
-                self.spoken_replacements[learned[0]] = learned[1]
+                learned_name = self._remember_personal_correction(*learned)
                 self._save_settings()
                 self._refresh_personal_phrases()
 
@@ -1124,14 +1212,20 @@ class Dictation:
             win.destroy()
 
             if learned:
-                message = f'Remembered: "{learned[0]}" -> "{learned[1]}"'
+                if learned_name:
+                    message = (f"Remembered {learned_name} and similar "
+                               "spellings")
+                else:
+                    message = f'Remembered: "{learned[0]}" -> "{learned[1]}"'
                 if (hasattr(self, "learn_status")
                         and self.learn_status.winfo_exists()):
-                    self.learn_status.config(
-                        text=(f'Learned "{learned[0]}" -> '
-                              f'"{learned[1]}".'),
-                        fg=ui.GOOD,
-                    )
+                    if learned_name:
+                        status = (f"Learned {learned_name} and similar "
+                                  "spellings.")
+                    else:
+                        status = (f'Learned "{learned[0]}" -> '
+                                  f'"{learned[1]}".')
+                    self.learn_status.config(text=status, fg=ui.GOOD)
             elif replaced:
                 message = "Corrected the last dictation"
             else:
@@ -1476,7 +1570,8 @@ class Dictation:
         self._reset_main_recording()
         self.last_insert_hwnd = None
         self.last_insert_time = 0.0
-        text = apply_spoken_replacements(text, self.spoken_replacements)
+        text = apply_spoken_replacements(
+            text, self.spoken_replacements, self.personal_names)
         self.last_text = text
         self._show_transcript(text)
 
