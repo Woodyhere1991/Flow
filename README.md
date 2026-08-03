@@ -75,6 +75,12 @@ connected** when you try to listen. Connect a microphone and try again.
 If you connect a headset while Flow is already open, it notices automatically
 and changes to **Microphone connected - ready to listen**.
 
+Flow normally follows the microphone selected in Windows. If Windows chooses
+the wrong one, open **Settings** and choose a microphone from the simple list.
+Flow remembers its name rather than Windows' temporary device number and falls
+back to the Windows default if that microphone disappears. If a microphone is
+connected but the signal is too quiet, Flow says so instead of guessing words.
+
 Click **Personalize Flow**, then **Fix latest dictation** after Flow gets a word
 wrong. Correct it once and save it. Flow automatically remembers a simple
 spelling change for next time, so you do not need to fill in both manual boxes.

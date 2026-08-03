@@ -378,8 +378,9 @@ class Dictation:
         self.settings_window = win
         win.title("Flow settings")
         win.configure(bg=ui.BG)
-        win.geometry(f"{ui.s(500)}x{ui.s(460)}")
-        win.minsize(ui.s(460), ui.s(430))
+        w, h = ui.fit_to_screen(win, ui.s(520), ui.s(590), margin=100)
+        win.geometry(f"{w}x{h}")
+        win.minsize(min(ui.s(470), w), min(ui.s(540), h))
         win.transient(self.root)
         ui.dark_titlebar(win)
         icon = Path(__file__).with_name("icon.ico")
@@ -396,6 +397,38 @@ class Dictation:
             bg=ui.BG, fg=ui.MUTED, font=(ui.FONT, 9), anchor="w",
             wraplength=ui.s(450), justify="left",
         ).pack(fill="x", pady=(3, 14))
+
+        microphone = ui.Card(wrap)
+        microphone.pack(fill="x", pady=(0, 10))
+        tk.Label(microphone.body, text="MICROPHONE", bg=ui.CARD,
+                 fg=ui.MUTED, font=(ui.FONT, 8, "bold"), anchor="w").pack(
+                     fill="x", padx=16, pady=(13, 5))
+        self.mic_choices = self._microphone_choices()
+        current_choice = "Automatic (recommended)"
+        for label, (name, host) in self.mic_choices.items():
+            if (name and name == self.input_device_name
+                    and host == self.input_hostapi):
+                current_choice = label
+                break
+        self.mic_choice = tk.StringVar(value=current_choice)
+        self.mic_box = ttk.Combobox(
+            microphone.body, textvariable=self.mic_choice,
+            values=list(self.mic_choices), state="readonly", width=48,
+        )
+        self.mic_box.pack(fill="x", padx=16)
+        self.mic_box.bind("<<ComboboxSelected>>", self._microphone_changed)
+        ui.Tooltip(
+            self.mic_box,
+            "Automatic follows the microphone selected in Windows. Choose a "
+            "specific microphone only when Windows selects the wrong one.",
+        )
+        self.mic_hint = tk.Label(
+            microphone.body,
+            text="Automatic is recommended and notices headsets reconnecting.",
+            bg=ui.CARD, fg=ui.MUTED, font=(ui.FONT, 8), anchor="w",
+            wraplength=ui.s(450), justify="left",
+        )
+        self.mic_hint.pack(fill="x", padx=16, pady=(5, 11))
 
         writing = ui.Card(wrap)
         writing.pack(fill="x", pady=(0, 10))
@@ -465,6 +498,71 @@ class Dictation:
 
     def _mode_changed(self):
         self.mode_hint.config(text=MODE_HELP[self.text_mode.get()])
+
+    def _microphone_choices(self):
+        """Return simple, stable microphone choices without driver duplicates."""
+        automatic = "Automatic (recommended)"
+        choices = {automatic: ("", "")}
+        candidates = []
+        host_priority = {"Windows WASAPI": 0, "MME": 1,
+                         "Windows DirectSound": 2}
+        try:
+            for device in sd.query_devices():
+                if int(device.get("max_input_channels", 0)) < 1:
+                    continue
+                host = sd.query_hostapis(device["hostapi"])["name"]
+                if host not in host_priority:
+                    continue
+                name = str(device["name"]).strip()
+                if name in ("Microsoft Sound Mapper - Input",
+                            "Primary Sound Capture Driver"):
+                    continue
+                candidates.append((host_priority[host], name.casefold(), name, host))
+        except Exception:
+            return choices
+
+        seen = set()
+        for _priority, key, name, host in sorted(candidates):
+            if key in seen:
+                continue
+            seen.add(key)
+            choices[name] = (name, host)
+        return choices
+
+    def _microphone_changed(self, _event=None):
+        """Save a stable microphone identity and reopen audio immediately."""
+        name, host = self.mic_choices.get(
+            self.mic_choice.get(), ("", ""))
+        self.input_device_name = name
+        self.input_hostapi = host
+        self._save_settings()
+
+        try:
+            if self.stream is not None:
+                self.stream.stop()
+                self.stream.close()
+        except Exception:
+            pass
+        self.stream = None
+        with self.lock:
+            self.chunks.clear()
+            self.total = self.dropped = 0
+        self.ambient = 0.0
+
+        if self.loading_model:
+            self.mic_hint.config(
+                text="Saved. Flow will use it after startup finishes.",
+                fg=ui.WARN,
+            )
+        elif self._start_stream():
+            self.mic_hint.config(
+                text="Microphone connected and ready.", fg=ui.GOOD)
+            self._set_state("Microphone connected - ready to listen", ui.GOOD)
+        else:
+            self.mic_hint.config(
+                text="That microphone could not open. Choose Automatic.",
+                fg=ui.REC,
+            )
 
     def _size_changed(self):
         self.hardware_choice_confirmed = True
@@ -1339,8 +1437,9 @@ class Dictation:
         if rms < gate:
             self._reset_main_recording()
             self._set_state(
-                f"Too quiet to be speech (rms {rms:.4f} < {gate:.4f})", "#c80")
-            self.overlay.show_done("No speech detected", good=False)
+                "Microphone connected, but your voice was too quiet. "
+                "Check mute or choose a microphone in Settings.", "#c80")
+            self.overlay.show_done("Voice too quiet", good=False)
             return
 
         self.busy = True
