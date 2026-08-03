@@ -176,6 +176,7 @@ class Dictation:
         self.mark = None
 
         self.model = None
+        self.loading_model = True
         self.busy = False
         self.last_text = ""
         self.last_insert_hwnd = None
@@ -225,7 +226,6 @@ class Dictation:
 
         threading.Thread(target=self._load_model, args=(self.size.get(),),
                          daemon=True).start()
-        self._start_stream()
         self._start_hotkeys()
 
     # ---------------------------------------------------------------- UI ----
@@ -472,8 +472,17 @@ class Dictation:
         self.size_hint.config(text=self._size_help(self.size.get()))
         if getattr(self, "loaded_size", None) == self.size.get():
             return
-        # Swap models in the background so the UI stays responsive.
+        # Reopen the mic after loading. A heavy model load can starve fragile
+        # Bluetooth audio drivers and make their stream disappear.
+        self.loading_model = True
         self.model = None
+        try:
+            if self.stream is not None:
+                self.stream.stop()
+                self.stream.close()
+        except Exception:
+            pass
+        self.stream = None
         self._set_state("Switching model...", ui.WARN)
         threading.Thread(target=self._load_model, args=(self.size.get(),),
                          daemon=True).start()
@@ -1044,6 +1053,7 @@ class Dictation:
     def _load_model(self, size):
         # size is passed in, never read from the Tk variable here: Tk variables
         # may only be touched from the thread running the main loop.
+        self.loading_model = True
         try:
             import torch
             from crisperwhisper import CrisperWhisperModel
@@ -1056,11 +1066,11 @@ class Dictation:
             self.model = CrisperWhisperModel(size, device=device,
                                              backend="transformers")
             self.loaded_size = size
-            if self._microphone_active():
-                self.events.put(("state", ("Ready to listen", "#080")))
-            else:
-                self.events.put(("state", ("No microphone connected", "#b00")))
+            # WDM-KS Bluetooth microphones must be opened from the main Windows
+            # thread. Let the UI event loop refresh and open the device.
+            self.events.put(("model_ready", None))
         except Exception as exc:
+            self.loading_model = False
             self.events.put(("state", (f"Model failed: {exc}", "#b00")))
 
     # -------------------------------------------------------------- audio ----
@@ -1124,6 +1134,9 @@ class Dictation:
 
     def _ensure_microphone(self):
         """Reconnect the mic if possible, otherwise explain the problem."""
+        if self.loading_model:
+            self._set_state("Flow is still starting - try again shortly", ui.WARN)
+            return False
         if not self._input_device_connected():
             self.mic_error = "No default input device"
             self._set_state(
@@ -1142,6 +1155,8 @@ class Dictation:
 
     def _watch_microphone(self):
         """Notice a headset being connected after Flow has already started."""
+        if self.loading_model:
+            return
         now = time.perf_counter()
         if now < self.next_mic_check:
             return
@@ -1412,6 +1427,12 @@ class Dictation:
                 kind, payload = self.events.get_nowait()
                 if kind == "state":
                     self._set_state(*payload)
+                elif kind == "model_ready":
+                    self.loading_model = False
+                    if self._start_stream():
+                        self._set_state("Ready to listen", "#080")
+                    else:
+                        self._set_state("No microphone connected", "#b00")
                 elif kind == "combo_down":
                     self._on_combo_down()
                 elif kind == "combo_up":
