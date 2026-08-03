@@ -70,13 +70,18 @@ BUSY = "#ffd60a"
 class Overlay:
     """A small always-on-top pill showing mic state. Never takes focus."""
 
-    def __init__(self, root, on_cancel=None):
+    def __init__(self, root, on_cancel=None, on_toggle=None):
         self.root = root
         self.on_cancel = on_cancel
+        self.on_toggle = on_toggle
         self.levels = [0.0] * BARS
         self.state = "hidden"
+        self.idle_enabled = False
+        self.hovered = False
         self._phase = 0
         self._drag = None
+        self._drag_start_xy = None
+        self._drag_moved = False
         self._hide_job = None
 
         self.win = tk.Toplevel(root)
@@ -94,9 +99,13 @@ class Overlay:
                                 bg=TRANSPARENT, highlightthickness=0, bd=0)
         self.canvas.pack(fill="both", expand=True)
 
-        # Drag to reposition, same as Wispr Flow's bar.
+        # A click starts/stops dictation. Moving while held still drags the pill.
+        self.canvas.configure(cursor="hand2")
+        self.canvas.bind("<Enter>", self._mouse_enter)
+        self.canvas.bind("<Leave>", self._mouse_leave)
         self.canvas.bind("<Button-1>", self._drag_start)
         self.canvas.bind("<B1-Motion>", self._drag_move)
+        self.canvas.bind("<ButtonRelease-1>", self._drag_end)
         self.canvas.bind("<Button-3>", lambda _e: self._cancel())
 
         self._place_default()
@@ -127,21 +136,68 @@ class Overlay:
         self.win.geometry(f"{self.w}x{self.h}+{x}+{y}")
 
     # ------------------------------------------------------------- drag ----
+    def _mouse_enter(self, _event=None):
+        self.hovered = True
+        self._render()
+
+    def _mouse_leave(self, _event=None):
+        self.hovered = False
+        self._render()
+
     def _drag_start(self, event):
         self._drag = (event.x_root - self.win.winfo_x(),
                       event.y_root - self.win.winfo_y())
+        self._drag_start_xy = (event.x_root, event.y_root)
+        self._drag_moved = False
 
     def _drag_move(self, event):
         if not self._drag:
             return
+        if self._drag_start_xy:
+            sx, sy = self._drag_start_xy
+            if abs(event.x_root - sx) + abs(event.y_root - sy) >= ui.s(5):
+                self._drag_moved = True
         dx, dy = self._drag
-        self.win.geometry(f"+{event.x_root - dx}+{event.y_root - dy}")
+        if self._drag_moved:
+            self.win.geometry(f"+{event.x_root - dx}+{event.y_root - dy}")
+
+    def _drag_end(self, _event=None):
+        clicked = self._drag is not None and not self._drag_moved
+        self._drag = None
+        self._drag_start_xy = None
+        self._drag_moved = False
+        if clicked and self.on_toggle:
+            self.on_toggle()
 
     def _cancel(self):
         if self.on_cancel:
             self.on_cancel()
 
     # ------------------------------------------------------------ states ----
+    def set_idle_enabled(self, enabled):
+        """Keep a clickable mic visible whenever Flow is otherwise idle."""
+        self.idle_enabled = bool(enabled)
+        if self.idle_enabled and self.state in ("hidden", "idle"):
+            self.show_idle()
+        elif not self.idle_enabled:
+            self.hide()
+
+    def show_idle(self):
+        if not self.idle_enabled:
+            self.hide()
+            return
+        self._cancel_hide()
+        self.state = "idle"
+        self.levels = [0.0] * BARS
+        self._show()
+        self._render()
+
+    def return_to_idle(self):
+        if self.idle_enabled:
+            self.show_idle()
+        else:
+            self.hide()
+
     def show_listening(self):
         self._cancel_hide()
         self.state = "listening"
@@ -166,7 +222,11 @@ class Overlay:
         self.state = "done" if good else "warn"
         self._show()
         self._render()
-        self._hide_job = self.root.after(650, self.hide)
+        self._hide_job = self.root.after(650, self._finish_flash)
+
+    def _finish_flash(self):
+        self._hide_job = None
+        self.return_to_idle()
 
     def hide(self):
         self._cancel_hide()
@@ -218,7 +278,9 @@ class Overlay:
         c.create_line(r, h - 1, w - r, h - 1, fill=EDGE)
 
         pad = ui.s(11)
-        if self.state == "listening":
+        if self.state == "idle":
+            self._draw_mic(c, w, h)
+        elif self.state == "listening":
             self._draw_wave(c, pad, w - pad, h, live=True)
         elif self.state == "transcribing":
             self._draw_wave(c, pad, w - pad, h, live=False)
@@ -228,6 +290,23 @@ class Overlay:
             cx, cy, rr = w / 2, h / 2, ui.s(4)
             c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr,
                           fill=colour, outline=colour)
+
+    def _draw_mic(self, c, w, h):
+        """Small microphone affordance; brightens when it is ready to click."""
+        colour = ACCENT if self.hovered else DIM
+        cx = w / 2
+        top = ui.s(5)
+        bottom = h - ui.s(8)
+        half = ui.s(3)
+        c.create_oval(cx - half, top, cx + half, bottom,
+                      fill=colour, outline=colour)
+        c.create_arc(cx - ui.s(6), top + ui.s(3), cx + ui.s(6),
+                     h - ui.s(4), start=180, extent=180,
+                     style="arc", outline=colour, width=max(1, ui.s(1)))
+        c.create_line(cx, h - ui.s(6), cx, h - ui.s(3),
+                      fill=colour, width=max(1, ui.s(1)))
+        c.create_line(cx - ui.s(4), h - ui.s(3), cx + ui.s(4),
+                      h - ui.s(3), fill=colour, width=max(1, ui.s(1)))
 
     def _draw_wave(self, c, x0, x1, h, live):
         """Thin centred bars. When not live, they shimmer to show work happening."""

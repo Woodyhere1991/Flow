@@ -278,7 +278,14 @@ class Dictation:
             var.trace_add("write", lambda *_: self._save_settings())
         self.at_startup.trace_add("write", lambda *_: self._apply_startup())
 
-        self.overlay = Overlay(root, on_cancel=self._cancel_recording)
+        self.overlay = Overlay(
+            root,
+            on_cancel=self._cancel_recording,
+            on_toggle=self._toggle_overlay_recording,
+        )
+        self.overlay.set_idle_enabled(self.show_overlay.get())
+        self.show_overlay.trace_add(
+            "write", lambda *_: self._overlay_setting_changed())
 
         self._build_ui()
         self.root.after(80, self._drain)
@@ -539,10 +546,10 @@ class Dictation:
         opts.pack(fill="x", pady=(0, 10))
         self._switch_row(
             opts.body, "Type into the app I am using", self.auto_paste,
-            "Used when you hold Ctrl and Windows to speak.", first=True)
+            "Used for both keyboard and floating-microphone dictation.", first=True)
         self._switch_row(
-            opts.body, "Show the listening indicator", self.show_overlay,
-            "Shows a small indicator while Flow is listening.")
+            opts.body, "Keep the mouse microphone on screen", self.show_overlay,
+            "Click the floating microphone to start or stop without the keyboard.")
         self._switch_row(
             opts.body, "Open Flow when Windows starts", self.at_startup,
             "Flow will be ready whenever you sign in.")
@@ -560,6 +567,10 @@ class Dictation:
 
     def _mode_changed(self):
         self.mode_hint.config(text=MODE_HELP[self.text_mode.get()])
+
+    def _overlay_setting_changed(self):
+        if hasattr(self, "overlay"):
+            self.overlay.set_idle_enabled(self.show_overlay.get())
 
     def _microphone_choices(self):
         """Return simple, stable microphone choices without driver duplicates."""
@@ -1089,6 +1100,35 @@ class Dictation:
         if self.show_overlay.get():
             self.overlay.show_listening()
 
+    def _toggle_overlay_recording(self):
+        """Start or stop dictation from the non-activating floating pill."""
+        if self.mode in (PTT, TOGGLE):
+            self._finish()
+            return
+        if self.busy:
+            self._set_state("Flow is turning your speech into text...", ui.WARN)
+            return
+        if self.personalize_mark is not None:
+            self._set_state("Finish the voice check first", ui.WARN)
+            self.overlay.show_done("Voice check active", good=False)
+            return
+        if self.model is None:
+            self._set_state("Flow is still starting. Try again in a moment.", ui.WARN)
+            self.overlay.show_done("Still starting", good=False)
+            return
+
+        # WS_EX_NOACTIVATE keeps the pill from becoming the foreground window,
+        # so this remains the app the user was typing into before the click.
+        self._capture_target()
+        if not self._ensure_microphone():
+            return
+        with self.lock:
+            self.mark = self.total
+        self.record_to_flow = False
+        self.mode = TOGGLE
+        self._set_state("Listening - click the microphone again to stop", ui.REC)
+        self.overlay.show_listening()
+
     def _reset_main_recording(self):
         self.record_to_flow = False
         if hasattr(self, "talk_button"):
@@ -1570,7 +1610,7 @@ class Dictation:
                 self.overlay.show_listening()
         else:
             self.last_tap = now
-            self.overlay.hide()
+            self.overlay.return_to_idle()
             self._schedule_idle_stream_close()
 
     def _finish(self):

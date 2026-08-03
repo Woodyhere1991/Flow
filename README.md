@@ -71,6 +71,11 @@ To speak directly into an email, document, or other app:
 For hands-free listening, quickly tap **Ctrl + Windows** twice. Flow keeps
 listening until you press **Ctrl + Windows** once more.
 
+For mouse-only dictation, hover over the small microphone pill near the bottom
+of the screen. Click it once, wait for the red waveform, and speak. Click it
+again to stop and type the result into the app you were using. Drag the pill to
+move it; right-click while recording to cancel.
+
 If Windows cannot find a microphone, Flow clearly says **No microphone
 connected** when you try to listen. Connect a microphone and try again.
 If you connect a headset while Flow is already open, it notices automatically
