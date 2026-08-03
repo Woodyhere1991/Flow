@@ -76,10 +76,67 @@ IDLE, PTT, TOGGLE = "idle", "ptt", "toggle"
 NOISE_ONLY = re.compile(r"^\s*(\[[^\]]*\]|\([^)]*\)|[\s.,!?-])*\s*$")
 
 
-def apply_spoken_replacements(text, replacements):
-    """Apply private, user-defined corrections after transcription."""
+def phonetic_key(word):
+    """Return a small pronunciation key for user-taught names."""
+    letters = re.sub(r"[^a-z]", "", word.casefold())
+    if not letters:
+        return ""
+    if letters.startswith("kn"):
+        letters = letters[1:]
+    letters = (letters.replace("ph", "f").replace("ck", "k")
+               .replace("qu", "k").replace("q", "k"))
+    letters = re.sub(r"c(?=[eiy])", "s", letters)
+    letters = letters.replace("c", "k").replace("x", "ks")
+    first = letters[0]
+    consonants = first + "".join(
+        char for char in letters[1:] if char not in "aeiouy"
+    )
+    return re.sub(r"(.)\1+", r"\1", consonants)
+
+
+def is_personal_name(text):
+    """True for one deliberately capitalised name-like word."""
+    return bool(re.fullmatch(r"[A-Z][A-Za-z'-]{2,}", text.strip()))
+
+
+def apply_personal_names(text, personal_names):
+    """Canonicalise sound-alike spellings only for explicitly taught names."""
+    by_sound = {}
+    for name in personal_names or ():
+        if not isinstance(name, str) or not is_personal_name(name):
+            continue
+        key = phonetic_key(name)
+        if key:
+            by_sound.setdefault(key, []).append(name)
+
+    # Never guess when two taught names have the same sound.
+    unambiguous = {
+        key: names[0] for key, names in by_sound.items()
+        if len({name.casefold() for name in names}) == 1
+    }
+
+    def replace(match):
+        heard = match.group(0)
+        token_start = match.start()
+        token_end = match.end()
+        while token_start and not text[token_start - 1].isspace():
+            token_start -= 1
+        while token_end < len(text) and not text[token_end].isspace():
+            token_end += 1
+        if "@" in text[token_start:token_end]:
+            return heard
+        target = unambiguous.get(phonetic_key(heard))
+        if not target or abs(len(heard) - len(target)) > 2:
+            return heard
+        return target
+
+    return re.sub(r"\b[A-Za-z][A-Za-z'-]*\b", replace, text)
+
+
+def apply_spoken_replacements(text, replacements, personal_names=None):
+    """Apply private exact corrections and user-taught sound-alike names."""
     if not isinstance(replacements, dict):
-        return text
+        return apply_personal_names(text, personal_names)
 
     # Longer phrases go first so a short nickname cannot take part of a more
     # specific phrase. Whitespace is flexible because speech models sometimes
@@ -94,7 +151,7 @@ def apply_spoken_replacements(text, replacements):
         phrase = r"\s+".join(re.escape(word) for word in words)
         text = re.sub(rf"(?<!\w){phrase}(?!\w)", written, text,
                       flags=re.IGNORECASE)
-    return text
+    return apply_personal_names(text, personal_names)
 
 
 def extract_simple_correction(original, corrected):
@@ -176,6 +233,7 @@ class Dictation:
         self.mark = None
 
         self.model = None
+        self.loading_model = True
         self.busy = False
         self.last_text = ""
         self.last_insert_hwnd = None
@@ -197,6 +255,13 @@ class Dictation:
         self.spoken_replacements = (
             saved_replacements if isinstance(saved_replacements, dict) else {}
         )
+        saved_names = saved.get("personal_names", [])
+        self.personal_names = {
+            name for name in saved_names
+            if isinstance(name, str) and is_personal_name(name)
+        }
+        self.input_device_name = str(saved.get("input_device_name", ""))
+        self.input_hostapi = str(saved.get("input_hostapi", ""))
         self.setup_seen = bool(saved.get("setup_seen", False))
         self.hardware_warning_seen = bool(
             saved.get("hardware_warning_seen", False))
@@ -223,7 +288,6 @@ class Dictation:
 
         threading.Thread(target=self._load_model, args=(self.size.get(),),
                          daemon=True).start()
-        self._start_stream()
         self._start_hotkeys()
 
     # ---------------------------------------------------------------- UI ----
@@ -251,9 +315,14 @@ class Dictation:
         head_actions = tk.Frame(head, bg=ui.BG)
         head_actions.pack(side="right", pady=(5, 0))
         ui.Button(head_actions, "Personalize", self._open_personalize,
-                  width=120, bg=ui.BG).pack(side="left")
+                  width=120, bg=ui.BG,
+                  help_text=("Check your microphone and teach Flow how to "
+                             "write names, emails, and special phrases.")).pack(side="left")
         ui.Button(head_actions, "Settings", self._open_settings,
-                  width=95, bg=ui.BG).pack(side="left", padx=(8, 0))
+                  width=95, bg=ui.BG,
+                  help_text=("Choose how Flow writes, its speed and accuracy, "
+                             "and what happens when Windows starts.")).pack(
+                                 side="left", padx=(8, 0))
 
         live = ui.Card(wrap)
         live.pack(fill="x", pady=(16, 12))
@@ -272,6 +341,8 @@ class Dictation:
         self.talk_button = ui.Button(
             live.body, "Start talking", self._toggle_main_recording,
             primary=True, width=220, height=46,
+            help_text=("Start listening through your microphone. Click again "
+                       "to stop and turn your speech into text."),
         )
         self.talk_button.pack(anchor="w", padx=18)
 
@@ -329,11 +400,19 @@ class Dictation:
         row = tk.Frame(wrap, bg=ui.BG)
         row.pack(fill="x", pady=(10, 0))
         ui.Button(row, "Copy text", self._copy_last, primary=True,
-                  width=115, bg=ui.BG).pack(side="left")
+                  width=115, bg=ui.BG,
+                  help_text="Copy your latest dictated text so you can paste it elsewhere.").pack(side="left")
         ui.Button(row, "Fix text", self._correct_last,
-                  width=100, bg=ui.BG).pack(side="left", padx=8)
+                  width=100, bg=ui.BG,
+                  help_text=("Correct the latest dictation. Flow can remember "
+                             "a simple spelling correction.")).pack(side="left", padx=8)
         ui.Button(row, "Undo typing", self._undo_last,
-                  width=110, bg=ui.BG).pack(side="left")
+                  width=110, bg=ui.BG,
+                  help_text="Remove the last text Flow typed into another app.").pack(side="left")
+        tk.Label(
+            wrap, text="Tip: Point at any button to see what it does.",
+            bg=ui.BG, fg=ui.MUTED, font=(ui.FONT, 8), anchor="w",
+        ).pack(fill="x", pady=(5, 0))
 
         # Kept so existing code that writes to self.meter keeps working.
         self.meter = tk.Label(wrap, bg=ui.BG, fg=ui.BG, text="")
@@ -349,7 +428,7 @@ class Dictation:
             tk.Label(words, text=description, bg=ui.CARD, fg=ui.MUTED,
                      font=(ui.FONT, 8), anchor="w", justify="left",
                      wraplength=ui.s(360)).pack(fill="x", pady=(2, 0))
-        ui.Toggle(row, var).pack(side="right")
+        ui.Toggle(row, var, help_text=description or label).pack(side="right")
 
     def _open_settings(self):
         if self.settings_window and self.settings_window.winfo_exists():
@@ -361,8 +440,9 @@ class Dictation:
         self.settings_window = win
         win.title("Flow settings")
         win.configure(bg=ui.BG)
-        win.geometry(f"{ui.s(500)}x{ui.s(460)}")
-        win.minsize(ui.s(460), ui.s(430))
+        w, h = ui.fit_to_screen(win, ui.s(520), ui.s(590), margin=100)
+        win.geometry(f"{w}x{h}")
+        win.minsize(min(ui.s(470), w), min(ui.s(540), h))
         win.transient(self.root)
         ui.dark_titlebar(win)
         icon = Path(__file__).with_name("icon.ico")
@@ -380,6 +460,38 @@ class Dictation:
             wraplength=ui.s(450), justify="left",
         ).pack(fill="x", pady=(3, 14))
 
+        microphone = ui.Card(wrap)
+        microphone.pack(fill="x", pady=(0, 10))
+        tk.Label(microphone.body, text="MICROPHONE", bg=ui.CARD,
+                 fg=ui.MUTED, font=(ui.FONT, 8, "bold"), anchor="w").pack(
+                     fill="x", padx=16, pady=(13, 5))
+        self.mic_choices = self._microphone_choices()
+        current_choice = "Automatic (recommended)"
+        for label, (name, host) in self.mic_choices.items():
+            if (name and name == self.input_device_name
+                    and host == self.input_hostapi):
+                current_choice = label
+                break
+        self.mic_choice = tk.StringVar(value=current_choice)
+        self.mic_box = ttk.Combobox(
+            microphone.body, textvariable=self.mic_choice,
+            values=list(self.mic_choices), state="readonly", width=48,
+        )
+        self.mic_box.pack(fill="x", padx=16)
+        self.mic_box.bind("<<ComboboxSelected>>", self._microphone_changed)
+        ui.Tooltip(
+            self.mic_box,
+            "Automatic follows the microphone selected in Windows. Choose a "
+            "specific microphone only when Windows selects the wrong one.",
+        )
+        self.mic_hint = tk.Label(
+            microphone.body,
+            text="Automatic is recommended and notices headsets reconnecting.",
+            bg=ui.CARD, fg=ui.MUTED, font=(ui.FONT, 8), anchor="w",
+            wraplength=ui.s(450), justify="left",
+        )
+        self.mic_hint.pack(fill="x", padx=16, pady=(5, 11))
+
         writing = ui.Card(wrap)
         writing.pack(fill="x", pady=(0, 10))
         tk.Label(writing.body, text="HOW SHOULD FLOW WRITE?", bg=ui.CARD,
@@ -389,6 +501,8 @@ class Dictation:
             writing.body, MODES, self.text_mode, width=300,
             command=self._mode_changed,
             labels={"intended": "Clean", "verbatim": "Word for word"},
+            help_text=("Choose Clean for tidy everyday writing, or Word for "
+                       "word to keep fillers, pauses, and spoken sounds."),
         )
         self.seg.pack(padx=14, anchor="w")
         self.mode_hint = tk.Label(
@@ -412,6 +526,8 @@ class Dictation:
                     "Recommended" if self.recommended_size == "small" else "Fastest"),
                 "large": "Most accurate",
             },
+            help_text=("Choose the speech model. Recommended suits this "
+                       "computer; other choices trade speed for accuracy."),
         ).pack(padx=14, anchor="w")
         self.size_hint = tk.Label(
             accuracy.body, bg=ui.CARD, fg=ui.MUTED, font=(ui.FONT, 8),
@@ -432,7 +548,9 @@ class Dictation:
             "Flow will be ready whenever you sign in.")
 
         ui.Button(wrap, "Done", self._close_settings, primary=True,
-                  width=100, bg=ui.BG).pack(anchor="w", pady=(2, 0))
+                  width=100, bg=ui.BG,
+                  help_text="Save these settings and return to Flow.").pack(
+                      anchor="w", pady=(2, 0))
         win.protocol("WM_DELETE_WINDOW", self._close_settings)
 
     def _close_settings(self):
@@ -443,14 +561,88 @@ class Dictation:
     def _mode_changed(self):
         self.mode_hint.config(text=MODE_HELP[self.text_mode.get()])
 
+    def _microphone_choices(self):
+        """Return simple, stable microphone choices without driver duplicates."""
+        automatic = "Automatic (recommended)"
+        choices = {automatic: ("", "")}
+        candidates = []
+        host_priority = {"Windows WASAPI": 0, "MME": 1,
+                         "Windows DirectSound": 2}
+        try:
+            for device in sd.query_devices():
+                if int(device.get("max_input_channels", 0)) < 1:
+                    continue
+                host = sd.query_hostapis(device["hostapi"])["name"]
+                if host not in host_priority:
+                    continue
+                name = str(device["name"]).strip()
+                if name in ("Microsoft Sound Mapper - Input",
+                            "Primary Sound Capture Driver"):
+                    continue
+                candidates.append((host_priority[host], name.casefold(), name, host))
+        except Exception:
+            return choices
+
+        seen = set()
+        for _priority, key, name, host in sorted(candidates):
+            if key in seen:
+                continue
+            seen.add(key)
+            choices[name] = (name, host)
+        return choices
+
+    def _microphone_changed(self, _event=None):
+        """Save a stable microphone identity and reopen audio immediately."""
+        name, host = self.mic_choices.get(
+            self.mic_choice.get(), ("", ""))
+        self.input_device_name = name
+        self.input_hostapi = host
+        self._save_settings()
+
+        try:
+            if self.stream is not None:
+                self.stream.stop()
+                self.stream.close()
+        except Exception:
+            pass
+        self.stream = None
+        with self.lock:
+            self.chunks.clear()
+            self.total = self.dropped = 0
+        self.ambient = 0.0
+
+        if self.loading_model:
+            self.mic_hint.config(
+                text="Saved. Flow will use it after startup finishes.",
+                fg=ui.WARN,
+            )
+        elif self._start_stream():
+            self.mic_hint.config(
+                text="Microphone connected and ready.", fg=ui.GOOD)
+            self._set_state("Microphone connected - ready to listen", ui.GOOD)
+        else:
+            self.mic_hint.config(
+                text="That microphone could not open. Choose Automatic.",
+                fg=ui.REC,
+            )
+
     def _size_changed(self):
         self.hardware_choice_confirmed = True
         self._save_settings()
         self.size_hint.config(text=self._size_help(self.size.get()))
         if getattr(self, "loaded_size", None) == self.size.get():
             return
-        # Swap models in the background so the UI stays responsive.
+        # Reopen the mic after loading. A heavy model load can starve fragile
+        # Bluetooth audio drivers and make their stream disappear.
+        self.loading_model = True
         self.model = None
+        try:
+            if self.stream is not None:
+                self.stream.stop()
+                self.stream.close()
+        except Exception:
+            pass
+        self.stream = None
         self._set_state("Switching model...", ui.WARN)
         threading.Thread(target=self._load_model, args=(self.size.get(),),
                          daemon=True).start()
@@ -551,6 +743,9 @@ class Dictation:
                 "mode": self.text_mode.get(),
                 "show_overlay": self.show_overlay.get(),
                 "size": self.size.get(),
+                "input_device_name": self.input_device_name,
+                "input_hostapi": self.input_hostapi,
+                "personal_names": sorted(self.personal_names),
                 "spoken_replacements": self.spoken_replacements,
                 "setup_seen": self.setup_seen,
                 "hardware_warning_seen": self.hardware_warning_seen,
@@ -577,8 +772,9 @@ class Dictation:
         self.personalize_window = win
         win.title("Welcome to Flow" if first_run else "Personalize Flow")
         win.configure(bg=ui.BG)
-        win.geometry(f"{ui.s(520)}x{ui.s(640)}")
-        win.minsize(ui.s(480), ui.s(590))
+        w, h = ui.fit_to_screen(win, ui.s(540), ui.s(700), margin=100)
+        win.geometry(f"{w}x{h}")
+        win.minsize(min(ui.s(490), w), min(ui.s(640), h))
         win.transient(self.root)
         ui.dark_titlebar(win)
         icon = Path(__file__).with_name("icon.ico")
@@ -592,7 +788,7 @@ class Dictation:
             "Two quick, optional steps help Flow understand you. "
             "You can change these later."
             if first_run else
-            "Check your microphone or teach Flow names, emails, and phrases."
+            "Check your microphone and let Flow learn from your corrections."
         )
         tk.Label(wrap, text=heading, bg=ui.BG, fg=ui.TEXT,
                  font=(ui.FONT, 18, "bold"), anchor="w").pack(fill="x")
@@ -632,19 +828,47 @@ class Dictation:
             font=(ui.FONT, 9, "bold"), cursor="hand2", padx=12, pady=6,
         )
         self.voice_check_btn.pack(anchor="w", padx=14, pady=(0, 12))
+        ui.Tooltip(
+            self.voice_check_btn,
+            "Record a short sample to check whether Flow can hear you clearly.",
+        )
 
         teach = ui.Card(wrap)
         teach.pack(fill="both", expand=True)
-        tk.Label(teach.body, text="2. TEACH FLOW A WORD (OPTIONAL)",
+        tk.Label(teach.body, text="2. LET FLOW LEARN AUTOMATICALLY",
                  bg=ui.CARD, fg=ui.ACCENT_2,
                  font=(ui.FONT, 8, "bold"), anchor="w").pack(
                      fill="x", padx=14, pady=(12, 3))
         tk.Label(
             teach.body,
-            text="Use this for a name, email, or phrase Flow may spell incorrectly.",
+            text=("After Flow gets something wrong, fix the latest dictation once. "
+                  "Flow remembers a simple spelling change for next time."),
             bg=ui.CARD, fg=ui.MUTED, font=(ui.FONT, 8), anchor="w",
             wraplength=ui.s(450), justify="left",
         ).pack(fill="x", padx=14, pady=(0, 7))
+        ui.Button(
+            teach.body, "Fix latest dictation", self._correct_from_personalize,
+            primary=True, width=155,
+            help_text=("Open your latest dictation, correct it once, and let "
+                       "Flow remember a simple change."),
+        ).pack(anchor="w", padx=14, pady=(0, 4))
+        latest_help = (
+            "Ready to fix your latest dictation."
+            if self.last_text else
+            "Nothing to fix yet. Dictate normally, then come back here."
+        )
+        self.learn_status = tk.Label(
+            teach.body, text=latest_help, bg=ui.CARD, fg=ui.MUTED,
+            font=(ui.FONT, 8), anchor="w",
+        )
+        self.learn_status.pack(fill="x", padx=14, pady=(0, 9))
+
+        tk.Frame(teach.body, bg=ui.LINE, height=1).pack(
+            fill="x", padx=14, pady=(0, 9))
+        tk.Label(teach.body, text="ADD A SPECIAL PHRASE MANUALLY (OPTIONAL)",
+                 bg=ui.CARD, fg=ui.MUTED,
+                 font=(ui.FONT, 8, "bold"), anchor="w").pack(
+                     fill="x", padx=14, pady=(0, 5))
         tk.Label(teach.body, text="If Flow hears:", bg=ui.CARD, fg=ui.TEXT,
                  font=(ui.FONT, 8), anchor="w").pack(fill="x", padx=14)
         self.heard_entry = tk.Entry(
@@ -668,9 +892,11 @@ class Dictation:
         phrase_actions = tk.Frame(teach.body, bg=ui.CARD)
         phrase_actions.pack(fill="x", padx=14, pady=(7, 7))
         ui.Button(phrase_actions, "Save word", self._save_personal_phrase,
-                  primary=True, width=110).pack(side="left")
+                  primary=True, width=110,
+                  help_text="Save the phrase in both boxes for future dictations.").pack(side="left")
         ui.Button(phrase_actions, "Remove selected", self._remove_personal_phrase,
-                  width=140).pack(side="left", padx=8)
+                  width=140,
+                  help_text="Delete the highlighted saved phrase from Flow.").pack(side="left", padx=8)
 
         self.phrase_list = tk.Listbox(
             teach.body, bg="#101014", fg=ui.TEXT, selectbackground=ui.ACCENT,
@@ -681,7 +907,9 @@ class Dictation:
         self._refresh_personal_phrases()
 
         ui.Button(wrap, "Done", self._close_personalize, primary=True,
-                  width=100, bg=ui.BG).pack(anchor="w", pady=(10, 0))
+                  width=100, bg=ui.BG,
+                  help_text="Close Personalize and return to Flow.").pack(
+                      anchor="w", pady=(10, 0))
 
         win.protocol("WM_DELETE_WINDOW", self._close_personalize)
 
@@ -696,8 +924,32 @@ class Dictation:
                 or not self.phrase_list.winfo_exists()):
             return
         self.phrase_list.delete(0, "end")
+        self.phrase_items = []
+        for name in sorted(self.personal_names, key=str.casefold):
+            self.phrase_list.insert(
+                "end", f"{name}  (also matches similar spellings)")
+            self.phrase_items.append(("name", name))
         for spoken, written in sorted(self.spoken_replacements.items()):
             self.phrase_list.insert("end", f"{spoken}  ->  {written}")
+            self.phrase_items.append(("replacement", spoken))
+
+    def _remember_personal_correction(self, spoken, written):
+        """Save an exact correction and learn a corrected personal name."""
+        self.spoken_replacements[spoken] = written
+        learned_name = written if is_personal_name(written) else None
+        if learned_name:
+            self.personal_names.add(learned_name)
+        return learned_name
+
+    def _correct_from_personalize(self):
+        """Open the normal one-step correction flow from Personalize."""
+        if not self.last_text:
+            self.learn_status.config(
+                text="Dictate something first, then click this button.",
+                fg=ui.WARN,
+            )
+            return
+        self._correct_last()
 
     def _save_personal_phrase(self):
         spoken = self.heard_entry.get().strip()
@@ -706,13 +958,17 @@ class Dictation:
             self.phrase_status.config(
                 text="Fill in both boxes first.", fg=ui.WARN)
             return
-        self.spoken_replacements[spoken] = written
+        learned_name = self._remember_personal_correction(spoken, written)
         self._save_settings()
         self._refresh_personal_phrases()
         self.heard_entry.delete(0, "end")
         self.written_entry.delete(0, "end")
-        self.phrase_status.config(text="Saved. Flow will use it next time.",
-                                  fg=ui.GOOD)
+        if learned_name:
+            message = (f"Saved {learned_name}. Flow will also catch similar "
+                       "spellings.")
+        else:
+            message = "Saved. Flow will use it next time."
+        self.phrase_status.config(text=message, fg=ui.GOOD)
 
     def _remove_personal_phrase(self):
         selected = self.phrase_list.curselection()
@@ -720,8 +976,14 @@ class Dictation:
             self.phrase_status.config(
                 text="Click a saved phrase first.", fg=ui.WARN)
             return
-        spoken = sorted(self.spoken_replacements)[selected[0]]
-        self.spoken_replacements.pop(spoken, None)
+        if selected[0] >= len(getattr(self, "phrase_items", [])):
+            self._refresh_personal_phrases()
+            return
+        kind, value = self.phrase_items[selected[0]]
+        if kind == "name":
+            self.personal_names.discard(value)
+        else:
+            self.spoken_replacements.pop(value, None)
         self._save_settings()
         self._refresh_personal_phrases()
         self.phrase_status.config(text="Removed.", fg=ui.MUTED)
@@ -927,8 +1189,9 @@ class Dictation:
                 return
 
             learned = extract_simple_correction(original, corrected)
+            learned_name = None
             if learned:
-                self.spoken_replacements[learned[0]] = learned[1]
+                learned_name = self._remember_personal_correction(*learned)
                 self._save_settings()
                 self._refresh_personal_phrases()
 
@@ -949,7 +1212,20 @@ class Dictation:
             win.destroy()
 
             if learned:
-                message = f'Remembered: "{learned[0]}" -> "{learned[1]}"'
+                if learned_name:
+                    message = (f"Remembered {learned_name} and similar "
+                               "spellings")
+                else:
+                    message = f'Remembered: "{learned[0]}" -> "{learned[1]}"'
+                if (hasattr(self, "learn_status")
+                        and self.learn_status.winfo_exists()):
+                    if learned_name:
+                        status = (f"Learned {learned_name} and similar "
+                                  "spellings.")
+                    else:
+                        status = (f'Learned "{learned[0]}" -> '
+                                  f'"{learned[1]}".')
+                    self.learn_status.config(text=status, fg=ui.GOOD)
             elif replaced:
                 message = "Corrected the last dictation"
             else:
@@ -957,14 +1233,19 @@ class Dictation:
             self._set_state(message, "#080")
 
         ui.Button(actions, "Save correction", save, primary=True,
-                  width=125, bg=ui.BG).pack(side="left")
+                  width=125, bg=ui.BG,
+                  help_text=("Use this corrected text and remember a simple "
+                             "spelling change when possible.")).pack(side="left")
         ui.Button(actions, "Cancel", win.destroy,
-                  width=85, bg=ui.BG).pack(side="left", padx=8)
+                  width=85, bg=ui.BG,
+                  help_text="Close this window without changing the text.").pack(
+                      side="left", padx=8)
 
     # -------------------------------------------------------------- model ----
     def _load_model(self, size):
         # size is passed in, never read from the Tk variable here: Tk variables
         # may only be touched from the thread running the main loop.
+        self.loading_model = True
         try:
             import torch
             from crisperwhisper import CrisperWhisperModel
@@ -977,11 +1258,11 @@ class Dictation:
             self.model = CrisperWhisperModel(size, device=device,
                                              backend="transformers")
             self.loaded_size = size
-            if self._microphone_active():
-                self.events.put(("state", ("Ready to listen", "#080")))
-            else:
-                self.events.put(("state", ("No microphone connected", "#b00")))
+            # WDM-KS Bluetooth microphones must be opened from the main Windows
+            # thread. Let the UI event loop refresh and open the device.
+            self.events.put(("model_ready", None))
         except Exception as exc:
+            self.loading_model = False
             self.events.put(("state", (f"Model failed: {exc}", "#b00")))
 
     # -------------------------------------------------------------- audio ----
@@ -997,8 +1278,11 @@ class Dictation:
         try:
             if self._microphone_active():
                 return True
-            self.stream = sd.InputStream(samplerate=RATE, channels=1, dtype="float32",
-                                         callback=cb, latency="low")
+            device = self._preferred_input_device()
+            self.stream = sd.InputStream(
+                samplerate=RATE, channels=1, dtype="float32",
+                callback=cb, latency="low", device=device,
+            )
             self.stream.start()
             self.mic_error = None
             return True
@@ -1008,10 +1292,28 @@ class Dictation:
             self.events.put(("state", ("No microphone connected", "#b00")))
             return False
 
-    def _input_device_connected(self):
-        """Return whether Windows currently has a usable default microphone."""
+    def _preferred_input_device(self):
+        """Resolve a saved microphone by stable name and Windows audio system."""
+        if not self.input_device_name or not self.input_hostapi:
+            return None
         try:
-            device = sd.query_devices(kind="input")
+            for index, device in enumerate(sd.query_devices()):
+                if int(device.get("max_input_channels", 0)) < 1:
+                    continue
+                host = sd.query_hostapis(device["hostapi"])["name"]
+                if (self.input_device_name.casefold() in device["name"].casefold()
+                        and host.casefold() == self.input_hostapi.casefold()):
+                    return index
+        except Exception:
+            pass
+        return None
+
+    def _input_device_connected(self):
+        """Return whether Windows currently has a usable microphone."""
+        try:
+            preferred = self._preferred_input_device()
+            device = sd.query_devices(preferred, "input") if preferred is not None \
+                else sd.query_devices(kind="input")
             return int(device.get("max_input_channels", 0)) > 0
         except Exception:
             return False
@@ -1024,6 +1326,9 @@ class Dictation:
 
     def _ensure_microphone(self):
         """Reconnect the mic if possible, otherwise explain the problem."""
+        if self.loading_model:
+            self._set_state("Flow is still starting - try again shortly", ui.WARN)
+            return False
         if not self._input_device_connected():
             self.mic_error = "No default input device"
             self._set_state(
@@ -1042,6 +1347,8 @@ class Dictation:
 
     def _watch_microphone(self):
         """Notice a headset being connected after Flow has already started."""
+        if self.loading_model:
+            return
         now = time.perf_counter()
         if now < self.next_mic_check:
             return
@@ -1224,8 +1531,9 @@ class Dictation:
         if rms < gate:
             self._reset_main_recording()
             self._set_state(
-                f"Too quiet to be speech (rms {rms:.4f} < {gate:.4f})", "#c80")
-            self.overlay.show_done("No speech detected", good=False)
+                "Microphone connected, but your voice was too quiet. "
+                "Check mute or choose a microphone in Settings.", "#c80")
+            self.overlay.show_done("Voice too quiet", good=False)
             return
 
         self.busy = True
@@ -1262,7 +1570,8 @@ class Dictation:
         self._reset_main_recording()
         self.last_insert_hwnd = None
         self.last_insert_time = 0.0
-        text = apply_spoken_replacements(text, self.spoken_replacements)
+        text = apply_spoken_replacements(
+            text, self.spoken_replacements, self.personal_names)
         self.last_text = text
         self._show_transcript(text)
 
@@ -1312,6 +1621,12 @@ class Dictation:
                 kind, payload = self.events.get_nowait()
                 if kind == "state":
                     self._set_state(*payload)
+                elif kind == "model_ready":
+                    self.loading_model = False
+                    if self._start_stream():
+                        self._set_state("Ready to listen", "#080")
+                    else:
+                        self._set_state("No microphone connected", "#b00")
                 elif kind == "combo_down":
                     self._on_combo_down()
                 elif kind == "combo_up":

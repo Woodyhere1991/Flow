@@ -65,6 +65,73 @@ def s(value):
     return int(round(value * SCALE))
 
 
+class Tooltip:
+    """Show a short plain-language description for any Tk widget."""
+
+    def __init__(self, widget, text, delay=350):
+        self.widget = widget
+        self.text = text
+        self.delay = delay
+        self.pending = None
+        self.window = None
+        widget._flow_tooltip = self
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<FocusIn>", self._schedule, add="+")
+        widget.bind("<FocusOut>", self._hide, add="+")
+        widget.bind("<Destroy>", self._hide, add="+")
+
+    def _schedule(self, _event=None):
+        self._cancel()
+        self.pending = self.widget.after(self.delay, self._show)
+
+    def _cancel(self):
+        if self.pending is not None:
+            try:
+                self.widget.after_cancel(self.pending)
+            except Exception:
+                pass
+            self.pending = None
+
+    def _show(self):
+        self.pending = None
+        if self.window or not self.text:
+            return
+        try:
+            pointer_x = self.widget.winfo_pointerx()
+            pointer_y = self.widget.winfo_pointery()
+            x = pointer_x + s(14)
+            y = pointer_y + s(18)
+            tip = tk.Toplevel(self.widget)
+            tip.wm_overrideredirect(True)
+            tip.attributes("-topmost", True)
+            tk.Label(
+                tip, text=self.text, bg="#2b2b33", fg=TEXT,
+                font=(FONT, 9), justify="left", wraplength=s(300),
+                padx=s(10), pady=s(7), relief="solid", bd=1,
+            ).pack()
+            tip.update_idletasks()
+            tip_w, tip_h = tip.winfo_reqwidth(), tip.winfo_reqheight()
+            max_x = self.widget.winfo_screenwidth() - tip_w - s(8)
+            max_y = self.widget.winfo_screenheight() - tip_h - s(8)
+            x = max(s(8), min(x, max_x))
+            if y > max_y:
+                y = max(s(8), pointer_y - tip_h - s(12))
+            tip.wm_geometry(f"+{x}+{y}")
+            self.window = tip
+        except Exception:
+            self.window = None
+
+    def _hide(self, _event=None):
+        self._cancel()
+        if self.window is not None:
+            try:
+                self.window.destroy()
+            except Exception:
+                pass
+            self.window = None
+
+
 def dark_titlebar(root):
     """Ask DWM for the dark title bar so the frame matches the window."""
     try:
@@ -192,15 +259,20 @@ class Card(tk.Canvas):
 class Toggle(tk.Canvas):
     """iOS-style switch bound to a tk.BooleanVar."""
 
-    def __init__(self, parent, variable, command=None):
+    def __init__(self, parent, variable, command=None, help_text=None):
         self.W, self.H = s(44), s(24)
         super().__init__(parent, width=self.W, height=self.H, bg=CARD,
-                         highlightthickness=0, bd=0, cursor="hand2")
+                         highlightthickness=0, bd=0, cursor="hand2",
+                         takefocus=1)
         self.var = variable
         self.command = command
         self.bind("<Button-1>", self._click)
+        self.bind("<Return>", self._click)
+        self.bind("<space>", self._click)
         self.var.trace_add("write", lambda *_: self._draw())
         self._draw()
+        if help_text:
+            self.tooltip = Tooltip(self, help_text)
 
     def _click(self, _e):
         self.var.set(not self.var.get())
@@ -224,10 +296,11 @@ class Segmented(tk.Canvas):
     """Two-or-more option selector bound to a tk.StringVar."""
 
     def __init__(self, parent, options, variable, width=300, height=34,
-                 command=None, labels=None):
+                 command=None, labels=None, help_text=None):
         width, height = s(width), s(height)
         super().__init__(parent, width=width, height=height, bg=CARD,
-                         highlightthickness=0, bd=0, cursor="hand2")
+                         highlightthickness=0, bd=0, cursor="hand2",
+                         takefocus=1)
         self.options = list(options)
         self.var = variable
         self.command = command
@@ -236,6 +309,8 @@ class Segmented(tk.Canvas):
         self.bind("<Button-1>", self._click)
         self.var.trace_add("write", lambda *_: self._draw())
         self._draw()
+        if help_text:
+            self.tooltip = Tooltip(self, help_text)
 
     def _click(self, event):
         idx = int(event.x // (self._cw / len(self.options)))
@@ -340,18 +415,23 @@ class Button(tk.Canvas):
     """Flat rounded button."""
 
     def __init__(self, parent, text, command, primary=False, width=110,
-                 height=34, bg=CARD):
+                 height=34, bg=CARD, help_text=None):
         width, height = s(width), s(height)
         super().__init__(parent, width=width, height=height, bg=bg,
-                         highlightthickness=0, bd=0, cursor="hand2")
+                         highlightthickness=0, bd=0, cursor="hand2",
+                         takefocus=1)
         self.text, self.command = text, command
         self.primary = primary
         self._cw, self._ch = width, height
         self._hover = False
         self.bind("<Button-1>", lambda _e: self.command())
+        self.bind("<Return>", lambda _e: self.command())
+        self.bind("<space>", lambda _e: self.command())
         self.bind("<Enter>", self._enter)
         self.bind("<Leave>", self._leave)
         self._draw()
+        if help_text:
+            self.tooltip = Tooltip(self, help_text)
 
     def set_text(self, text):
         """Change the label without rebuilding the button."""
