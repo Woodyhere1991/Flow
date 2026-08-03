@@ -58,14 +58,15 @@ Double-click **Flow** on the Desktop. The main screen explains everything.
 The easiest way:
 
 1. Click **Start talking**.
-2. Speak naturally.
+2. Wait for the red listening indicator, then speak naturally.
 3. Click **Stop and write**. Your words appear in Flow and are copied for you.
 
 To speak directly into an email, document, or other app:
 
 1. Click where you want the words to appear.
-2. Hold the **Ctrl** and **Windows** keys while you speak.
-3. Let go when you are finished. Flow types the words there.
+2. Hold the **Ctrl** and **Windows** keys.
+3. Wait for the red listening indicator, then speak.
+4. Let go when you are finished. Flow types the words there.
 
 For hands-free listening, quickly tap **Ctrl + Windows** twice. Flow keeps
 listening until you press **Ctrl + Windows** once more.
@@ -128,17 +129,19 @@ warm by the time you need it.
 
 ### Privacy
 
-The mic is held **open the whole time Dictate is running**. That's deliberate:
-a mic takes ~0.65s to wake up, so opening it on keypress would swallow your
-first word. Audio stays in memory as a rolling 2-minute window, is never
-written to disk except for the temporary clip being transcribed, and never
-leaves the PC. The temporary file is deleted immediately after transcription.
-Closing the window releases the mic.
+The speech model stays loaded, but the microphone opens only while you dictate
+or run a voice check. This avoids interfering with calls and prevents Bluetooth
+headsets from being held in their call mode. A Bluetooth mic can take around a
+second to wake, so Flow shows a yellow starting indicator first; begin speaking
+when it turns red. Audio is never written to disk except for the temporary clip
+being transcribed, and never leaves the PC. The temporary file is deleted
+immediately after transcription.
 
 ### Two things it handles for you
 
-- **Pre-roll.** It keeps 0.35s of audio from *before* you pressed the keys, so
-  starting to talk a fraction early doesn't clip your first word.
+- **Mic warm-up.** Flow waits until the microphone is genuinely sending audio
+  before the indicator turns red, so Bluetooth startup delay does not silently
+  clip the beginning of the recording.
 - **Noise markers.** CrisperWhisper transcribes verbatim, so an empty room
   produces `[breath]` or `[lipsmack]`. Those are filtered out — a result made
   only of them types nothing at all, rather than pasting junk into your

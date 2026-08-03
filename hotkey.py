@@ -8,11 +8,10 @@ Global push-to-talk dictation.
 The text is pasted wherever you are typing, and always copied to the clipboard
 as a fallback.
 
-PRIVACY: the microphone is held open the whole time this runs, so that
-push-to-talk catches your first word instead of losing it to the ~0.65s a mic
-takes to wake up. Audio sits in memory only - a rolling window of the last
-MAX_BUFFER_SECONDS - and nothing is written to disk or sent anywhere. Closing
-the window releases the mic.
+PRIVACY: the speech model stays loaded, but the microphone opens only while a
+dictation or voice check is active. Bluetooth microphones can take around a
+second to wake up, so wait for the red listening indicator before speaking.
+Audio sits in memory only and nothing is sent anywhere.
 
 Launch with Dictate.bat (or: venv\Scripts\pythonw.exe hotkey.py)
 """
@@ -48,7 +47,7 @@ LEGACY_SETTINGS_PATH = Path(__file__).with_name("settings.json")
 
 RATE = 16000
 MAX_BUFFER_SECONDS = 120     # rolling audio kept in memory
-PREROLL_SECONDS = 0.35       # audio kept from just before the key went down
+MIC_WARMUP_TIMEOUT = 4.0     # Bluetooth can take 0.65-2s to deliver audio
 HOLD_THRESHOLD = 0.35        # longer than this = a hold, shorter = a tap
 DOUBLE_TAP_WINDOW = 0.70     # forgiving enough for a deliberate double-tap
 MIN_CLIP_SECONDS = 0.25
@@ -64,7 +63,6 @@ SILENCE_PEAK = 0.0002
 # times louder than room noise even on a poor Bluetooth mic.
 MIN_SPEECH_RMS = 0.005
 SPEECH_OVER_AMBIENT = 1.8
-AMBIENT_SMOOTHING = 0.05
 
 IDLE, PTT, TOGGLE = "idle", "ptt", "toggle"
 
@@ -220,8 +218,10 @@ class Dictation:
         self.dropped = 0      # absolute samples discarded off the front
         self.lock = threading.Lock()
         self.stream = None
+        self.idle_close_job = None
         self.mic_error = None
         self.next_mic_check = 0.0
+        self.last_mic_connected = None
 
         # hotkey state ---------------------------------------------------------
         self.ctrl = False
@@ -238,7 +238,7 @@ class Dictation:
         self.last_text = ""
         self.last_insert_hwnd = None
         self.last_insert_time = 0.0
-        self.ambient = 0.0      # rolling estimate of room noise, learnt while idle
+        self.ambient = 0.0      # room noise sampled while each mic stream wakes
         self.target_hwnd = None  # window that was focused when dictation began
         self.personalize_window = None
         self.personalize_mark = None
@@ -592,20 +592,14 @@ class Dictation:
         return choices
 
     def _microphone_changed(self, _event=None):
-        """Save a stable microphone identity and reopen audio immediately."""
+        """Save a stable microphone identity without holding it open."""
         name, host = self.mic_choices.get(
             self.mic_choice.get(), ("", ""))
         self.input_device_name = name
         self.input_hostapi = host
         self._save_settings()
 
-        try:
-            if self.stream is not None:
-                self.stream.stop()
-                self.stream.close()
-        except Exception:
-            pass
-        self.stream = None
+        self._stop_stream(clear_buffers=True)
         with self.lock:
             self.chunks.clear()
             self.total = self.dropped = 0
@@ -616,10 +610,11 @@ class Dictation:
                 text="Saved. Flow will use it after startup finishes.",
                 fg=ui.WARN,
             )
-        elif self._start_stream():
+        elif self._input_device_connected():
             self.mic_hint.config(
-                text="Microphone connected and ready.", fg=ui.GOOD)
-            self._set_state("Microphone connected - ready to listen", ui.GOOD)
+                text="Microphone ready. It opens only while you dictate.",
+                fg=ui.GOOD)
+            self._set_state("Ready to listen", ui.GOOD)
         else:
             self.mic_hint.config(
                 text="That microphone could not open. Choose Automatic.",
@@ -632,17 +627,9 @@ class Dictation:
         self.size_hint.config(text=self._size_help(self.size.get()))
         if getattr(self, "loaded_size", None) == self.size.get():
             return
-        # Reopen the mic after loading. A heavy model load can starve fragile
-        # Bluetooth audio drivers and make their stream disappear.
         self.loading_model = True
         self.model = None
-        try:
-            if self.stream is not None:
-                self.stream.stop()
-                self.stream.close()
-        except Exception:
-            pass
-        self.stream = None
+        self._stop_stream(clear_buffers=True)
         self._set_state("Switching model...", ui.WARN)
         threading.Thread(target=self._load_model, args=(self.size.get(),),
                          daemon=True).start()
@@ -990,15 +977,15 @@ class Dictation:
 
     def _toggle_voice_check(self):
         if self.personalize_mark is None:
-            if not self._ensure_microphone():
-                self.personalize_status.config(
-                    text="No microphone connected. Connect one and try again.",
-                    fg=ui.REC)
-                return
             if self.model is None:
                 self.personalize_status.config(
                     text="Flow is still starting. Try again in a few seconds.",
                     fg=ui.WARN)
+                return
+            if not self._ensure_microphone():
+                self.personalize_status.config(
+                    text="No microphone connected. Connect one and try again.",
+                    fg=ui.REC)
                 return
             with self.lock:
                 self.personalize_mark = self.total
@@ -1009,6 +996,7 @@ class Dictation:
             return
 
         mark, self.personalize_mark = self.personalize_mark, None
+        self._stop_stream()
         audio = self._grab(mark)
         self.voice_check_btn.config(text="Start voice check", bg=ui.ACCENT)
         if len(audio) / RATE < 0.5:
@@ -1080,22 +1068,20 @@ class Dictation:
         if self.busy:
             self._set_state("Flow is turning your speech into text...", ui.WARN)
             return
-        if not self._ensure_microphone():
+        if self.mode == TOGGLE and self.record_to_flow:
+            self._finish()
             return
         if self.model is None:
             self._set_state("Flow is still starting. Try again in a moment.", ui.WARN)
             return
-
-        if self.mode == TOGGLE and self.record_to_flow:
-            self._finish()
+        if not self._ensure_microphone():
             return
         if self.mode != IDLE:
             self._set_state("Finish the current recording first.", ui.WARN)
             return
 
         with self.lock:
-            self.mark = max(self.dropped,
-                            self.total - int(PREROLL_SECONDS * RATE))
+            self.mark = self.total
         self.record_to_flow = True
         self.mode = TOGGLE
         self.talk_button.set_text("Stop and write")
@@ -1113,6 +1099,7 @@ class Dictation:
         if self.mode in (PTT, TOGGLE):
             self.mode = IDLE
             self.mark = None
+            self._stop_stream()
             self._reset_main_recording()
             self._set_state("Cancelled", "#c80")
             self.overlay.show_done("Cancelled", good=False)
@@ -1277,26 +1264,110 @@ class Dictation:
 
         try:
             if self._microphone_active():
+                self._cancel_idle_stream_close()
                 return True
+            self._cancel_idle_stream_close()
+            with self.lock:
+                self.chunks.clear()
+                self.total = self.dropped = 0
             device = self._preferred_input_device()
             self.stream = sd.InputStream(
                 samplerate=RATE, channels=1, dtype="float32",
                 callback=cb, latency="low", device=device,
             )
             self.stream.start()
+
+            # A Bluetooth stream can report itself active well before it sends
+            # a real audio frame. Do not tell the user to speak until the first
+            # callback arrives, then discard that warm-up audio.
+            deadline = time.perf_counter() + MIC_WARMUP_TIMEOUT
+            ready = False
+            while time.perf_counter() < deadline:
+                with self.lock:
+                    ready = self.total > 0
+                if ready:
+                    break
+                self.root.update_idletasks()
+                time.sleep(0.02)
+            if not ready:
+                raise RuntimeError("Microphone opened but sent no audio")
+
+            with self.lock:
+                warmup = (np.concatenate(list(self.chunks))
+                          if self.chunks else np.zeros(0, dtype="float32"))
+                self.chunks.clear()
+                self.total = self.dropped = 0
+            if len(warmup):
+                warmup_rms = float(np.sqrt((warmup ** 2).mean()))
+                # Ignore an early spoken word; otherwise use the wake-up frame
+                # as this dictation's estimate of the room noise.
+                if 0 < warmup_rms < 0.02:
+                    self.ambient = warmup_rms
             self.mic_error = None
             return True
         except Exception as exc:
-            self.stream = None
+            self._stop_stream(clear_buffers=True)
             self.mic_error = str(exc)
             self.events.put(("state", ("No microphone connected", "#b00")))
             return False
 
-    def _preferred_input_device(self):
-        """Resolve a saved microphone by stable name and Windows audio system."""
-        if not self.input_device_name or not self.input_hostapi:
-            return None
+    def _cancel_idle_stream_close(self):
+        if self.idle_close_job is not None:
+            try:
+                self.root.after_cancel(self.idle_close_job)
+            except Exception:
+                pass
+            self.idle_close_job = None
+
+    def _stop_stream(self, clear_buffers=False):
+        """Release the microphone so calls and Bluetooth audio own it cleanly."""
+        self._cancel_idle_stream_close()
+        stream, self.stream = self.stream, None
         try:
+            if stream is not None:
+                stream.stop()
+                stream.close()
+        except Exception:
+            pass
+        if clear_buffers:
+            with self.lock:
+                self.chunks.clear()
+                self.total = self.dropped = 0
+
+    def _schedule_idle_stream_close(self):
+        """Keep a first tap warm just long enough to recognise a double-tap."""
+        self._cancel_idle_stream_close()
+
+        def close_if_idle():
+            self.idle_close_job = None
+            if (self.mode == IDLE and not self.busy
+                    and self.personalize_mark is None):
+                self._stop_stream()
+
+        delay = int((DOUBLE_TAP_WINDOW + 0.10) * 1000)
+        self.idle_close_job = self.root.after(delay, close_if_idle)
+
+    def _preferred_input_device(self):
+        """Resolve the selected mic, preferring modern shared WASAPI."""
+        try:
+            if not self.input_device_name or not self.input_hostapi:
+                default = sd.query_devices(kind="input")
+                default_name = str(default["name"]).casefold()
+                candidates = []
+                priority = {"Windows WASAPI": 0, "Windows DirectSound": 1,
+                            "MME": 2}
+                for index, device in enumerate(sd.query_devices()):
+                    if int(device.get("max_input_channels", 0)) < 1:
+                        continue
+                    if str(device["name"]).casefold() != default_name:
+                        continue
+                    host = sd.query_hostapis(device["hostapi"])["name"]
+                    if host in priority:
+                        candidates.append((priority[host], index))
+                if candidates:
+                    return min(candidates)[1]
+                return None
+
             for index, device in enumerate(sd.query_devices()):
                 if int(device.get("max_input_channels", 0)) < 1:
                     continue
@@ -1336,6 +1407,13 @@ class Dictation:
             self.overlay.show_done("No microphone connected", good=False)
             return False
 
+        if not self._microphone_active():
+            self._set_state(
+                "Starting microphone - wait for the red indicator", ui.WARN)
+            if self.show_overlay.get():
+                self.overlay.show_transcribing()
+            self.root.update_idletasks()
+
         if self._microphone_active() or self._start_stream():
             self.mic_error = None
             return True
@@ -1356,18 +1434,16 @@ class Dictation:
 
         connected = self._input_device_connected()
         active = self._microphone_active()
-        if connected and not active:
-            if self._start_stream() and self.model is not None and self.mode == IDLE:
-                self._set_state("Microphone connected - ready to listen", ui.GOOD)
-        elif not connected and active:
-            try:
-                self.stream.stop()
-                self.stream.close()
-            except Exception:
-                pass
-            self.stream = None
+        if not connected and active:
+            self._stop_stream(clear_buffers=True)
             if self.mode == IDLE:
                 self._set_state("No microphone connected", ui.REC)
+        elif connected != self.last_mic_connected and self.mode == IDLE:
+            if connected:
+                self._set_state("Ready to listen", ui.GOOD)
+            else:
+                self._set_state("No microphone connected", ui.REC)
+        self.last_mic_connected = connected
 
     def _grab(self, start_abs):
         """Audio from absolute sample index start_abs to now."""
@@ -1377,15 +1453,6 @@ class Dictation:
             data = np.concatenate(list(self.chunks))
             begin = max(0, start_abs - self.dropped)
             return data[begin:].copy()
-
-    def _recent_rms(self):
-        """RMS over the last few chunks - used to learn the room's noise floor."""
-        with self.lock:
-            recent = list(self.chunks)[-5:]
-        if not recent:
-            return 0.0
-        data = np.concatenate(recent)
-        return float(np.sqrt((data ** 2).mean()))
 
     def _level(self):
         with self.lock:
@@ -1455,17 +1522,17 @@ class Dictation:
         self.combo_armed = False
         if self.busy:
             return
-        if not self._ensure_microphone():
-            return
         if self.model is None:
             self._set_state("Flow is still starting. Try again in a moment.", ui.WARN)
             return
+        if not self._ensure_microphone():
+            return
         self.combo_armed = True
         self._capture_target()
-        # Start capturing immediately so a hold loses nothing. If this turns out
-        # to be a short tap we simply throw the marker away.
+        # The stream is now genuinely delivering frames. If this turns out to
+        # be a short tap, keep it warm briefly in case it is a double-tap.
         with self.lock:
-            self.mark = max(self.dropped, self.total - int(PREROLL_SECONDS * RATE))
+            self.mark = self.total
         self.mode = PTT
         self._set_state("Listening...", "#b00")
         if self.show_overlay.get():
@@ -1504,14 +1571,17 @@ class Dictation:
         else:
             self.last_tap = now
             self.overlay.hide()
+            self._schedule_idle_stream_close()
 
     def _finish(self):
         mark, self.mark = self.mark, None
         self.mode = IDLE
         if mark is None:
+            self._stop_stream()
             self._reset_main_recording()
             return
 
+        self._stop_stream()
         audio = self._grab(mark)
         secs = len(audio) / RATE
         if secs < MIN_CLIP_SECONDS:
@@ -1623,7 +1693,7 @@ class Dictation:
                     self._set_state(*payload)
                 elif kind == "model_ready":
                     self.loading_model = False
-                    if self._start_stream():
+                    if self._input_device_connected():
                         self._set_state("Ready to listen", "#080")
                     else:
                         self._set_state("No microphone connected", "#b00")
@@ -1665,23 +1735,12 @@ class Dictation:
                 self.wave.active = False
                 self.wave.reset()
                 self.wave.draw()
-            # Learn the room's background level only while not recording, so
-            # the gate adapts to a noisy room without counting speech as noise.
-            quiet = self._recent_rms()
-            if quiet > 0:
-                self.ambient = (AMBIENT_SMOOTHING * quiet
-                                + (1 - AMBIENT_SMOOTHING) * self.ambient)
 
         self.overlay.tick()
         self.root.after(80, self._drain)
 
     def _on_close(self):
-        try:
-            if self.stream:
-                self.stream.stop()
-                self.stream.close()
-        except Exception:
-            pass
+        self._stop_stream(clear_buffers=True)
         try:
             self.listener.stop()
         except Exception:
