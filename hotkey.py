@@ -19,10 +19,13 @@ Launch with Dictate.bat (or: venv\Scripts\pythonw.exe hotkey.py)
 import ctypes
 import difflib
 import json
+import logging
+import logging.handlers
 import os
 import queue
 import re
 import subprocess
+import sys
 import threading
 import time
 import tkinter as tk
@@ -44,6 +47,59 @@ APP_DATA_DIR = Path(os.environ.get(
 SETTINGS_PATH = APP_DATA_DIR / "settings.json"
 HARDWARE_PATH = APP_DATA_DIR / "hardware.json"
 LEGACY_SETTINGS_PATH = Path(__file__).with_name("settings.json")
+LOG_PATH = APP_DATA_DIR / "flow.log"
+
+log = logging.getLogger("flow")
+
+
+def setup_logging():
+    """Send everything to a rotating file.
+
+    Flow runs under pythonw.exe, which has no console and discards stderr, so
+    an unhandled exception used to vanish completely - the app just stopped
+    responding with nothing to look at. The log is the only way to find out
+    what happened after the fact.
+    """
+    APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    log.setLevel(logging.INFO)
+    if log.handlers:
+        return
+    handler = logging.handlers.RotatingFileHandler(
+        LOG_PATH, maxBytes=512_000, backupCount=2, encoding="utf-8")
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(threadName)-12s %(message)s"))
+    log.addHandler(handler)
+
+    # Exceptions that escape a thread or the main loop are logged, not lost.
+    def _hook(exc_type, exc, tb):
+        log.error("unhandled exception", exc_info=(exc_type, exc, tb))
+
+    sys.excepthook = _hook
+    threading.excepthook = lambda a: log.error(
+        "unhandled exception in thread %s", a.thread and a.thread.name,
+        exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
+
+
+def claim_single_instance(name="Local\\FlowDictation"):
+    """Return a mutex handle, or None if Flow is already running.
+
+    Two copies both register a global Ctrl+Win hook and both try to open the
+    microphone. They fight: one steals the audio device from the other, and
+    whichever handles the keystroke may not be the one showing the pill. The
+    named mutex is per-session, so a second launch bows out instead.
+
+    Note this counts Python processes, not windows: launching Flow through the
+    venv's pythonw.exe shows up as two processes, because that executable is a
+    stub that runs the real interpreter as a child. Only the child gets here.
+    """
+    handle = ctypes.windll.kernel32.CreateMutexW(None, False, name)
+    if not handle:
+        return None                      # cannot tell - let this copy run
+    ERROR_ALREADY_EXISTS = 183
+    if ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return None
+    return handle
 
 RATE = 16000
 MAX_BUFFER_SECONDS = 120     # rolling audio kept in memory
@@ -52,6 +108,9 @@ HOLD_THRESHOLD = 0.35        # longer than this = a hold, shorter = a tap
 DOUBLE_TAP_WINDOW = 0.70     # forgiving enough for a deliberate double-tap
 MIN_CLIP_SECONDS = 0.25
 SILENCE_PEAK = 0.0002
+# Well past the worst measured run (large model, 2 minutes of audio, ~40s). Only
+# a transcription that has genuinely stopped reporting back trips this.
+STUCK_BUSY_SECONDS = 180
 
 # Whisper invents plausible sentences out of near-silence ("What was it like at
 # home?" from an empty room), and in intended mode those look like real speech,
@@ -234,7 +293,8 @@ class Dictation:
 
         self.model = None
         self.loading_model = True
-        self.busy = False
+        self._busy = False
+        self._busy_since = 0.0
         self.last_text = ""
         self.last_insert_hwnd = None
         self.last_insert_time = 0.0
@@ -1268,6 +1328,22 @@ class Dictation:
                   help_text="Close this window without changing the text.").pack(
                       side="left", padx=8)
 
+    # --------------------------------------------------------------- state ----
+    @property
+    def busy(self):
+        """True while a transcription is in flight; blocks the hotkey.
+
+        A property so every assignment is timestamped, letting the watchdog
+        notice a transcription that never reported back. Nothing may leave
+        this set permanently - it is the one flag that can mute Ctrl+Win.
+        """
+        return self._busy
+
+    @busy.setter
+    def busy(self, value):
+        self._busy = bool(value)
+        self._busy_since = time.perf_counter() if value else 0.0
+
     # -------------------------------------------------------------- model ----
     def _load_model(self, size):
         # size is passed in, never read from the Tk variable here: Tk variables
@@ -1656,21 +1732,30 @@ class Dictation:
                          args=(audio, self.text_mode.get()), daemon=True).start()
 
     def _transcribe(self, audio, mode):
-        import tempfile
-
-        import soundfile as sf
-        tmp = Path(tempfile.gettempdir()) / "crisperwhisper_dictation.wav"
+        # Everything is inside the try, imports included. This runs on a worker
+        # thread while self.busy is set, and busy is only cleared by an event
+        # from here - so a path that returns without queuing one (a failed
+        # import used to do exactly that) leaves the hotkey dead for good.
+        tmp = None
         try:
+            import tempfile
+
+            import soundfile as sf
+            tmp = Path(tempfile.gettempdir()) / "crisperwhisper_dictation.wav"
+            if self.model is None:
+                raise RuntimeError("the speech model is not loaded yet")
             sf.write(str(tmp), audio, RATE)
             # mode is a native model capability, not post-processing.
             result = self.model.transcribe(str(tmp), language="en", mode=mode)
             self.events.put(("text", result.text.strip()))
         except Exception as exc:
+            log.exception("transcription failed")
             self.events.put(("state", (f"Failed: {exc}", "#b00")))
             self.events.put(("done", None))
         finally:
             try:
-                tmp.unlink(missing_ok=True)
+                if tmp is not None:
+                    tmp.unlink(missing_ok=True)
             except Exception:
                 pass
 
@@ -1725,41 +1810,87 @@ class Dictation:
             self._set_state("Couldn't type it - copied to clipboard instead", "#c80")
             self.overlay.show_done("Copied instead", good=False)
 
+    def _handle_event(self, kind, payload):
+        if kind == "state":
+            self._set_state(*payload)
+        elif kind == "model_ready":
+            self.loading_model = False
+            if self._input_device_connected():
+                self._set_state("Ready to listen", "#080")
+            else:
+                self._set_state("No microphone connected", "#b00")
+        elif kind == "combo_down":
+            self._on_combo_down()
+        elif kind == "combo_up":
+            self._on_combo_up(payload)
+        elif kind == "text":
+            try:
+                self._deliver(payload)
+            finally:
+                # Cleared even if delivery blew up. Left set, it would make
+                # _on_combo_down ignore the hotkey from then on.
+                self.busy = False
+        elif kind == "voice_check":
+            self._show_voice_check_result(payload)
+        elif kind == "voice_check_error":
+            if (self.personalize_window
+                    and self.personalize_window.winfo_exists()):
+                self.personalize_status.config(
+                    text=f"Voice check failed: {payload}", fg=ui.WARN)
+        elif kind == "done":
+            self.busy = False
+            self._reset_main_recording()
+
     def _drain(self):
+        """The app's heartbeat: the only place queued hotkey events get acted on.
+
+        Every step below is isolated. This loop rescheduling itself is what
+        keeps the hotkey alive, so a single failure - a Win32 call refusing
+        mid-paste, an overlay redraw on a disconnected monitor - must never be
+        able to stop it. When this died, Flow stayed on screen looking healthy
+        while Ctrl+Win did nothing until it was restarted.
+        """
         try:
             while True:
-                kind, payload = self.events.get_nowait()
-                if kind == "state":
-                    self._set_state(*payload)
-                elif kind == "model_ready":
-                    self.loading_model = False
-                    if self._input_device_connected():
-                        self._set_state("Ready to listen", "#080")
-                    else:
-                        self._set_state("No microphone connected", "#b00")
-                elif kind == "combo_down":
-                    self._on_combo_down()
-                elif kind == "combo_up":
-                    self._on_combo_up(payload)
-                elif kind == "text":
-                    self._deliver(payload)
-                    self.busy = False
-                elif kind == "voice_check":
-                    self._show_voice_check_result(payload)
-                elif kind == "voice_check_error":
-                    if (self.personalize_window
-                            and self.personalize_window.winfo_exists()):
-                        self.personalize_status.config(
-                            text=f"Voice check failed: {payload}", fg=ui.WARN)
-                elif kind == "done":
-                    self.busy = False
-                    self._reset_main_recording()
-        except queue.Empty:
-            pass
+                try:
+                    kind, payload = self.events.get_nowait()
+                except queue.Empty:
+                    break
+                try:
+                    self._handle_event(kind, payload)
+                except Exception:
+                    log.exception("event %r failed", kind)
+                    try:
+                        self._recover_from_error()
+                    except Exception:
+                        log.exception("recovery itself failed")
 
-        if self.mode == IDLE and not self.busy:
-            self._watch_microphone()
+            try:
+                self._watchdog()
+            except Exception:
+                log.exception("watchdog failed")
 
+            try:
+                if self.mode == IDLE and not self.busy:
+                    self._watch_microphone()
+            except Exception:
+                log.exception("microphone watch failed")
+
+            try:
+                self._paint_level()
+            except Exception:
+                log.exception("level painting failed")
+
+            try:
+                self.overlay.tick()
+            except Exception:
+                log.exception("overlay tick failed")
+        finally:
+            # Unconditional: losing this reschedule is what silently bricks
+            # the hotkey, so it happens even while an exception is unwinding.
+            self.root.after(80, self._drain)
+
+    def _paint_level(self):
         if self.mode in (PTT, TOGGLE):
             level = self._level()
             db = 20 * np.log10(max(level, 1e-6))
@@ -1776,8 +1907,50 @@ class Dictation:
                 self.wave.reset()
                 self.wave.draw()
 
-        self.overlay.tick()
-        self.root.after(80, self._drain)
+    def _recover_from_error(self):
+        """Put Flow back in a state where the next Ctrl+Win press works."""
+        self.busy = False
+        self.mode = IDLE
+        self.mark = None
+        try:
+            self._stop_stream(clear_buffers=True)
+        except Exception:
+            log.exception("could not release the microphone during recovery")
+        try:
+            self._reset_main_recording()
+        except Exception:
+            log.exception("could not reset the record button during recovery")
+        try:
+            self.overlay.return_to_idle()
+        except Exception:
+            log.exception("could not reset the overlay during recovery")
+        self._set_state("Something went wrong - ready to try again", "#c80")
+
+    def _watchdog(self):
+        """Restart the key listener if Windows or an error killed it.
+
+        pynput's listener is a low-level Windows hook on its own thread.
+        Windows drops hooks that are slow to respond, and the thread also ends
+        on an unhandled error - either way it stops silently and Ctrl+Win goes
+        dead while everything else keeps working.
+        """
+        if (self.busy
+                and time.perf_counter() - self._busy_since > STUCK_BUSY_SECONDS):
+            log.error("transcription never reported back after %.0fs - resetting",
+                      time.perf_counter() - self._busy_since)
+            self._recover_from_error()
+
+        listener = getattr(self, "listener", None)
+        if listener is not None and listener.is_alive():
+            return
+        log.warning("key listener is not running - restarting it")
+        self.ctrl = self.win = False
+        self.combo_since = None
+        try:
+            self._start_hotkeys()
+            log.info("key listener restarted")
+        except Exception:
+            log.exception("could not restart the key listener")
 
     def _on_close(self):
         self._stop_stream(clear_buffers=True)
@@ -1789,6 +1962,16 @@ class Dictation:
 
 
 if __name__ == "__main__":
+    setup_logging()
+
+    # Held for the life of the process; releasing it early would let a second
+    # copy in. Two copies fight over the keyboard hook and the microphone.
+    _instance_lock = claim_single_instance()
+    if _instance_lock is None:
+        log.info("another copy of Flow is already running - exiting")
+        sys.exit(0)
+
+    log.info("starting Flow (python %s, %s)", sys.version.split()[0], sys.executable)
     ui.enable_dpi_awareness()      # must happen before the Tk root is created
     # Every Python script runs as "pythonw.exe" to Windows, so without this the
     # taskbar groups Flow under a generic Python icon instead of its own - the
@@ -1798,6 +1981,18 @@ if __name__ == "__main__":
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Flow.Dictation")
     except Exception:
         pass
-    root = tk.Tk()
-    Dictation(root)
-    root.mainloop()
+    try:
+        root = tk.Tk()
+        Dictation(root)
+        root.mainloop()
+    except Exception:
+        # Without this a failure to start was completely silent: pythonw has no
+        # console, so nothing appeared and no error was written anywhere.
+        log.exception("Flow could not start")
+        try:
+            messagebox.showerror(
+                "Flow", f"Flow could not start.\n\nDetails are in:\n{LOG_PATH}")
+        except Exception:
+            pass
+        sys.exit(1)
+    log.info("Flow closed")
