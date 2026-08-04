@@ -103,7 +103,8 @@ def claim_single_instance(name="Local\\FlowDictation"):
 
 RATE = 16000
 MAX_BUFFER_SECONDS = 120     # rolling audio kept in memory
-MIC_WARMUP_TIMEOUT = 4.0     # Bluetooth can take 0.65-2s to deliver audio
+MIC_WARMUP_TIMEOUT = 6.0     # Bluetooth can take 0.65-3.3s to deliver audio
+MIC_RESCAN_SECONDS = 5.0     # how often to re-look for devices when none found
 HOLD_THRESHOLD = 0.35        # longer than this = a hold, shorter = a tap
 DOUBLE_TAP_WINDOW = 0.70     # forgiving enough for a deliberate double-tap
 MIN_CLIP_SECONDS = 0.25
@@ -280,6 +281,7 @@ class Dictation:
         self.idle_close_job = None
         self.mic_error = None
         self.next_mic_check = 0.0
+        self.next_mic_rescan = 0.0
         self.last_mic_connected = None
 
         # hotkey state ---------------------------------------------------------
@@ -1422,8 +1424,13 @@ class Dictation:
             self.mic_error = None
             return True
         except Exception as exc:
+            log.warning("could not start the microphone: %s", exc)
             self._stop_stream(clear_buffers=True)
             self.mic_error = str(exc)
+            # The cached device list may be stale - a device that has gone away
+            # or changed mode still looks present until the library re-reads it.
+            self._rescan_audio_devices()
+            self.next_mic_rescan = time.perf_counter() + MIC_RESCAN_SECONDS
             self.events.put(("state", ("No microphone connected", "#b00")))
             return False
 
@@ -1517,7 +1524,13 @@ class Dictation:
             self._set_state("Flow is still starting - try again shortly", ui.WARN)
             return False
         if not self._input_device_connected():
+            # Look again before giving up. The user pressing the key is the
+            # best possible moment to find a headset that has just woken up.
+            self._rescan_audio_devices()
+            self.next_mic_rescan = time.perf_counter() + MIC_RESCAN_SECONDS
+        if not self._input_device_connected():
             self.mic_error = "No default input device"
+            log.info("no input device found, even after rescanning")
             self._set_state(
                 "No microphone connected - connect one and try again", ui.REC)
             self.overlay.show_done("No microphone connected", good=False)
@@ -1539,6 +1552,26 @@ class Dictation:
         self.overlay.show_done("No microphone connected", good=False)
         return False
 
+    def _rescan_audio_devices(self):
+        """Ask the audio library to look for devices again.
+
+        It reads the device list once at start-up and then caches it, so a
+        headset connected later - or a Bluetooth one switching into headset
+        mode, which makes its microphone appear as a new device - stayed
+        invisible and Flow claimed there was no microphone until it was
+        restarted. Only safe while nothing is recording, because this tears
+        the audio system down and builds it back up.
+        """
+        if self.stream is not None:
+            return False
+        try:
+            sd._terminate()
+            sd._initialize()
+            return True
+        except Exception:
+            log.exception("could not rescan audio devices")
+            return False
+
     def _watch_microphone(self):
         """Notice a headset being connected after Flow has already started."""
         if self.loading_model:
@@ -1549,6 +1582,14 @@ class Dictation:
         self.next_mic_check = now + 2.0
 
         connected = self._input_device_connected()
+        if not connected and now >= self.next_mic_rescan:
+            # Rescanning is heavier than a plain lookup, so it only happens
+            # when no microphone can be found and only every few seconds.
+            self.next_mic_rescan = now + MIC_RESCAN_SECONDS
+            if self._rescan_audio_devices():
+                connected = self._input_device_connected()
+                if connected:
+                    log.info("found a microphone after rescanning")
         active = self._microphone_active()
         if not connected and active:
             self._stop_stream(clear_buffers=True)
