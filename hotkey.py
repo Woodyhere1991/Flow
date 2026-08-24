@@ -1425,6 +1425,9 @@ class Dictation:
             return True
         except Exception as exc:
             log.warning("could not start the microphone: %s", exc)
+            # Most common cause on this PC (resolved 2026-08-24): the Bluetooth
+            # dongle was in a non-USB 3.0 port. Worth checking first.
+            log.info("if this repeats, move the Bluetooth dongle to a USB 3.0 port")
             self._stop_stream(clear_buffers=True)
             self.mic_error = str(exc)
             # The cached device list may be stale - a device that has gone away
