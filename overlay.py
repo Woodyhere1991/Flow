@@ -277,13 +277,6 @@ class Overlay:
         c.create_line(r, 0, w - r, 0, fill=EDGE)
         c.create_line(r, h - 1, w - r, h - 1, fill=EDGE)
 
-        if self.state in ("listening", "transcribing"):
-            for a in range(0, 360, 24):
-                hue = ui.now_hue(a / 360 * 0.25, 0.22) + a / 360
-                c.create_arc(0, 0, w - 1, h - 1, start=a, extent=22,
-                             style="arc", outline=ui.hsv_hex(hue),
-                             width=max(2, ui.s(1)))
-
         pad = ui.s(11)
         if self.state == "idle":
             self._draw_mic(c, w, h)

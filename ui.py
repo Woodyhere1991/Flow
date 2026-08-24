@@ -330,156 +330,6 @@ class WavyTitle(tk.Canvas):
                              fill=hsv_hex(now_hue(k * 0.13, 0.10), 0.9, 0.95))
 
 
-class RainbowBand(tk.Canvas):
-    """Full-width split-fountain gradient band with the title living on it."""
-
-    def __init__(self, parent, title, tagline="", height=78, bg=BG):
-        super().__init__(parent, bg=bg, highlightthickness=0, bd=0)
-        self._title = title
-        self._tagline = tagline
-        self._cw = 1
-        self._ch = s(height)
-        self.configure(height=self._ch)
-        self.bind("<Configure>", lambda e: setattr(self, "_cw", e.width))
-        self._animate()
-
-    def _animate(self):
-        try:
-            if not self.winfo_exists():
-                return
-            if self._cw > 2:
-                self._paint()
-        except Exception:
-            return
-        self.after(66, self._animate)
-
-    def _paint(self):
-        import math
-        self.delete("all")
-        w, h = self._cw, self._ch
-        base = now_hue(0.55, 0.04)
-        bands = 40
-        bw = w / bands
-        for i in range(bands):
-            hue = base + (i / bands) * 0.28
-            colour = hsv_hex(hue, 0.80, 0.34)
-            self.create_rectangle(i * bw, 0, (i + 1) * bw + 1, h,
-                                  fill=colour, outline=colour)
-        for k in range(3):
-            pts = []
-            amp = s(2.5) + k * s(1.2)
-            phase = _clock.perf_counter() * (2.2 + 0.5 * k) + k * 2.0
-            for step in range(30):
-                x = (step / 29) * w
-                y = h - s(9) + k * s(3) + amp * math.sin(step * 0.8 + phase)
-                pts += [x, y]
-            self.create_line(*pts, smooth=True, width=max(2, s(2)),
-                             fill=hsv_hex(now_hue(k * 0.12, 0.15), 0.9, 1.0))
-        ty = s(24)
-        self.create_text(w / 2 + s(2), ty + s(2), text=self._title,
-                         fill="#12081f", font=(FONT, 22, "bold"))
-        self.create_text(w / 2, ty, text=self._title, fill="#ffffff",
-                         font=(FONT, 22, "bold"))
-        if self._tagline:
-            self.create_text(w / 2, ty + s(26), text=self._tagline,
-                             fill="#e8dcff", font=(FONT, 9))
-
-
-class PlasmaStrip(tk.Canvas):
-    """Liquid-light-show strip: real animated plasma where numpy + Pillow
-    are available, drifting gradient bands as the fallback."""
-
-    def __init__(self, parent, height=52, text="", radius=14, bg=CARD):
-        super().__init__(parent, bg=bg, highlightthickness=0, bd=0)
-        self._ch = s(height)
-        self._text = text
-        self._radius = s(radius)
-        self._cw = 1
-        self.configure(height=self._ch)
-        self.bind("<Configure>", lambda e: setattr(self, "_cw", e.width))
-        self._photo = None
-        try:
-            import numpy as np
-            from PIL import Image, ImageDraw, ImageTk
-            self._np = np
-            self._PILImage = Image
-            self._PILDraw = ImageDraw
-            self._ImageTk = ImageTk
-            self._plasma = True
-        except Exception:
-            self._plasma = False
-        self._animate()
-
-    def _animate(self):
-        try:
-            if not self.winfo_exists():
-                return
-            if self._cw > 2:
-                self._paint()
-        except Exception:
-            return
-        self.after(50, self._animate)
-
-    def _plasma_image(self, w, h):
-        np = self._np
-        t = _clock.perf_counter() * 0.6
-        lw, lh = max(24, w // 10), max(8, h // 10)
-        y, x = np.mgrid[0:lh, 0:lw]
-        u = x / lw * 6.283
-        v = y / lh * 6.283
-        val = (np.sin(u * 1.3 + t) + np.sin(v * 1.7 - t * 1.3)
-               + np.sin((u + v) * 0.9 + t * 0.7)
-               + np.sin(np.hypot(u - 3.1, v - 1.6) * 1.4 - t * 1.1))
-        span = float(val.max() - val.min()) or 1.0
-        hue = ((val - val.min()) / span * 0.85 + t * 0.04) % 1.0
-        sat = 0.80
-        k6 = hue * 6
-        i = k6.astype(int) % 6
-        f = k6 - k6.astype(int)
-        one = np.ones_like(f)
-        zero = np.zeros_like(f)
-        q = 1 - sat * f
-        tv = 1 - sat * (1 - f)
-        r = np.select([i == 0, i == 1, i == 2, i == 3, i == 4, i == 5],
-                      [one, q, zero, zero, tv, one])
-        g = np.select([i == 0, i == 1, i == 2, i == 3, i == 4, i == 5],
-                      [tv, one, one, q, zero, zero])
-        b = np.select([i == 0, i == 1, i == 2, i == 3, i == 4, i == 5],
-                      [zero, zero, tv, one, one, q])
-        rgb = (np.dstack([r, g, b]) * 255).astype("uint8")
-        img = self._PILImage.fromarray(rgb).resize((w, h), self._PILImage.BILINEAR)
-        mask = self._PILImage.new("L", (w, h), 0)
-        md = self._PILDraw.Draw(mask)
-        md.rounded_rectangle([0, 0, w - 1, h - 1], radius=self._radius, fill=255)
-        md.rectangle([0, h // 2, w - 1, h - 1], fill=255)
-        img.putalpha(mask)
-        return img
-
-    def _paint(self):
-        import math
-        self.delete("all")
-        w, h = self._cw, self._ch
-        if self._plasma:
-            img = self._plasma_image(w, h)
-            self._photo = self._ImageTk.PhotoImage(img)
-            self.create_image(0, 0, image=self._photo, anchor="nw")
-        else:
-            base = now_hue(0.2, 0.08)
-            bands = 32
-            bw = w / bands
-            for i in range(bands):
-                colour = hsv_hex(base + (i / bands) * 0.35, 0.8, 0.45)
-                self.create_rectangle(i * bw, 0, (i + 1) * bw + 1, h,
-                                      fill=colour, outline=colour)
-        if self._text:
-            ty = h / 2 - s(2)
-            for dx, dy in ((-1, -1), (1, -1), (-1, 1), (1, 1)):
-                self.create_text(w / 2 + dx, ty + dy, text=self._text,
-                                 fill="#12081f", font=(FONT, 9, "bold"))
-            self.create_text(w / 2, ty, text=self._text, fill="#ffffff",
-                             font=(FONT, 9, "bold"))
-
-
 def round_rect(canvas, x0, y0, x1, y1, r, **kw):
     """Rounded rectangle as a smoothed polygon."""
     r = min(r, abs(x1 - x0) / 2, abs(y1 - y0) / 2)
@@ -659,7 +509,6 @@ class Wave(tk.Canvas):
                          highlightthickness=0, bd=0)
         self.bars = bars
         self.levels = [0.0] * bars
-        self.peaks = [0.0] * bars
         self._cw, self._ch = width, height
         self.active = False
         self.bind("<Configure>", self._on_resize)
@@ -676,7 +525,6 @@ class Wave(tk.Canvas):
 
     def reset(self):
         self.levels = [0.0] * self.bars
-        self.peaks = [0.0] * self.bars
 
     def draw(self):
         import math
@@ -689,7 +537,6 @@ class Wave(tk.Canvas):
         for i, lvl in enumerate(self.levels[-n:]):
             db = 20 * math.log10(max(lvl, 1e-6))
             frac = max(0.03, min(1.0, (db + 60) / 60))
-            self.peaks[i] = max(self.peaks[i] * 0.93, frac)
             bh = max(2, frac * (self._ch - 10))
             x = i * (bw + gap)
             if self.active:
@@ -699,12 +546,6 @@ class Wave(tk.Canvas):
                 colour = "#241a38"
             self.create_rectangle(x, mid - bh / 2, x + bw, mid + bh / 2,
                                   fill=colour, outline=colour)
-            if self.active and self.peaks[i] > 0.08:
-                py = mid - max(2, self.peaks[i] * (self._ch - 10)) / 2
-                pr = max(1, bw / 3)
-                self.create_oval(x + bw / 2 - pr, py - pr,
-                                 x + bw / 2 + pr, py + pr,
-                                 fill="#ffffff", outline="#ffffff")
 
 
 class Button(tk.Canvas):
@@ -720,8 +561,6 @@ class Button(tk.Canvas):
         self.primary = primary
         self._cw, self._ch = width, height
         self._hover = False
-        self.pulse = False
-        self._pulse_job = None
         self.bind("<Button-1>", lambda _e: self.command())
         self.bind("<Return>", lambda _e: self.command())
         self.bind("<space>", lambda _e: self.command())
@@ -735,32 +574,6 @@ class Button(tk.Canvas):
         """Change the label without rebuilding the button."""
         self.text = text
         self._draw()
-
-    def set_pulse(self, on):
-        """Animate a rainbow ring around the button while on."""
-        self.pulse = bool(on)
-        if self.pulse and self._pulse_job is None:
-            self._pulse_loop()
-        elif not self.pulse and self._pulse_job is not None:
-            try:
-                self.after_cancel(self._pulse_job)
-            except Exception:
-                pass
-            self._pulse_job = None
-            self._draw()
-
-    def _pulse_loop(self):
-        try:
-            if not self.winfo_exists() or not self.pulse:
-                self._pulse_job = None
-                if self.winfo_exists():
-                    self._draw()
-                return
-            self._draw()
-        except Exception:
-            self._pulse_job = None
-            return
-        self._pulse_job = self.after(90, self._pulse_loop)
 
     def _enter(self, _e):
         self._hover = True
@@ -778,10 +591,6 @@ class Button(tk.Canvas):
             bot = lerp_hex(GRAD_B, "#ffffff", lift)
             gradient_rect(self, 0, 0, self._cw - 1, self._ch - 1, 9,
                           top, bot)
-            if self.pulse:
-                ring = hsv_hex(now_hue(0.0, 0.30), 0.9, 1.0)
-                round_rect(self, -1, -1, self._cw, self._ch, 10,
-                           outline=ring)
             fg = "#ffffff"
         else:
             fill = CARD_HI if self._hover else "#201233"
