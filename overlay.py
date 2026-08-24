@@ -52,18 +52,18 @@ BARS = 11
 PILL_W = 84
 PILL_H = 24
 
-BG = "#17171c"
-EDGE = "#33333d"
+BG = "#181028"
+EDGE = "#3b2566"
 
 # The window itself is always a rectangle; painting it this colour and marking
 # that colour transparent is what leaves only the pill shape visible. It must
 # be a colour used nowhere else in the drawing.
 TRANSPARENT = "#ff00ff"
-FG = "#f4f4f6"
-DIM = "#5a5a66"
-ACCENT = "#7c5cff"
-REC = "#ff453a"
-OK = "#32d74b"
+FG = "#f8f2ff"
+DIM = "#7f68a8"
+ACCENT = "#ff4fd8"
+REC = "#ff3860"
+OK = "#39ff88"
 BUSY = "#ffd60a"
 
 
@@ -322,11 +322,13 @@ class Overlay:
                 # Log scale: linear amplitude is invisible at speech levels.
                 db = 20 * math.log10(max(lvl, 1e-6))
                 frac = max(0.10, min(1.0, (db + 60) / 60))
-                colour = ACCENT if frac > 0.25 else DIM
+                hue = ui.now_hue((i / n) * 0.45, 0.12)
+                colour = ui.hsv_hex(hue, 0.85, 0.30 + 0.65 * frac)
             else:
                 # travelling ripple while transcribing
                 frac = 0.25 + 0.35 * (1 + math.sin((i - self._phase * 0.9) / 1.6)) / 2
-                colour = ACCENT
+                hue = ui.now_hue(self._phase * 0.02, 0.15)
+                colour = ui.hsv_hex(hue, 0.85, 0.45 + 0.4 * frac)
             bh = max(ui.s(2), frac * (h - ui.s(12)))
             c.create_rectangle(x, mid - bh / 2, x + bw, mid + bh / 2,
                                fill=colour, outline=colour)

@@ -6,8 +6,11 @@ custom shape (cards, switches, segmented controls, key caps) is drawn on a
 Canvas instead.
 """
 
+import colorsys
 import ctypes
+import time as _clock
 import tkinter as tk
+import tkinter.font as tkfont
 from ctypes import wintypes
 
 
@@ -106,7 +109,7 @@ class Tooltip:
             tip.wm_overrideredirect(True)
             tip.attributes("-topmost", True)
             tk.Label(
-                tip, text=self.text, bg="#2b2b33", fg=TEXT,
+                tip, text=self.text, bg=CARD, fg=TEXT,
                 font=(FONT, 9), justify="left", wraplength=s(300),
                 padx=s(10), pady=s(7), relief="solid", bd=1,
             ).pack()
@@ -198,20 +201,133 @@ def fit_to_screen(root, width, height, margin=80):
     return min(width, max_w), min(height, max_h)
 
 
-# palette -------------------------------------------------------------------
-BG = "#0b0b0f"
-CARD = "#17171c"
-CARD_HI = "#1f1f26"
-LINE = "#2a2a33"
-TEXT = "#f4f4f6"
-MUTED = "#8b8b96"
-ACCENT = "#7c5cff"
-ACCENT_2 = "#38bdf8"
-GOOD = "#32d74b"
-WARN = "#ffd60a"
-REC = "#ff453a"
+def place_centered(win, width, height):
+    """Size a window and drop it in the middle of the screen."""
+    win.update_idletasks()
+    sw = win.winfo_screenwidth()
+    sh = win.winfo_screenheight()
+    x = max(0, (sw - width) // 2)
+    y = max(0, (sh - height) // 2)
+    win.geometry(f"{width}x{height}+{x}+{y}")
 
-FONT = "Segoe UI"
+
+# palette -------------------------------------------------------------------
+BG = "#0c0618"
+CARD = "#181028"
+CARD_HI = "#241638"
+LINE = "#3b2566"
+TEXT = "#f8f2ff"
+MUTED = "#a08cc0"
+ACCENT = "#ff4fd8"
+ACCENT_2 = "#00e5ff"
+GOOD = "#39ff88"
+WARN = "#ffd60a"
+REC = "#ff3860"
+GRAD_B = "#8a5cff"
+
+FONT = "Comic Sans MS"
+
+
+def hsv_hex(h, sat=0.85, val=1.0):
+    """HSV to '#rrggbb', hue wrapping so it can drift past 1.0."""
+    r, g, b = colorsys.hsv_to_rgb(h % 1.0, min(1.0, max(0.0, sat)),
+                                  min(1.0, max(0.0, val)))
+    return "#{:02x}{:02x}{:02x}".format(
+        round(r * 255), round(g * 255), round(b * 255))
+
+
+def lerp_hex(c1, c2, t):
+    t = min(1.0, max(0.0, t))
+    r1, g1, b1 = int(c1[1:3], 16), int(c1[3:5], 16), int(c1[5:7], 16)
+    r2, g2, b2 = int(c2[1:3], 16), int(c2[3:5], 16), int(c2[5:7], 16)
+    return "#{:02x}{:02x}{:02x}".format(
+        round(r1 + (r2 - r1) * t),
+        round(g1 + (g2 - g1) * t),
+        round(b1 + (b2 - b1) * t))
+
+
+def now_hue(offset=0.0, speed=0.05):
+    """A slowly drifting rainbow phase for animations."""
+    return (_clock.perf_counter() * speed + offset) % 1.0
+
+
+def rainbow_label(label, speed=0.06, offset=0.0, sat=0.85, val=1.0,
+                  period_ms=90):
+    """Keep a label's foreground cycling through the spectrum."""
+
+    def tick():
+        try:
+            if not label.winfo_exists():
+                return
+            label.config(fg=hsv_hex(now_hue(offset, speed), sat, val))
+        except Exception:
+            return
+        label.after(period_ms, tick)
+
+    tick()
+
+
+def gradient_rect(canvas, x0, y0, x1, y1, r, top, bottom, steps=12):
+    """Vertical gradient inside a rounded rect.
+
+    Canvas has no clipping, so the bands only span the straight middle of the
+    shape; the corners keep the solid bottom colour and the eye reads it as
+    one smooth fill.
+    """
+    round_rect(canvas, x0, y0, x1, y1, r, fill=bottom, outline=bottom)
+    band_top, band_bot = y0 + r, y1 - r
+    span = band_bot - band_top
+    if span > 0:
+        step = span / steps
+        for i in range(steps):
+            colour = lerp_hex(top, bottom, i / max(1, steps - 1))
+            ya = band_top + i * step
+            canvas.create_rectangle(x0, ya, x1, ya + step + 1,
+                                    fill=colour, outline=colour)
+
+
+class WavyTitle(tk.Canvas):
+    """App title with hue-cycling text over animated rainbow waves."""
+
+    def __init__(self, parent, text, size=21, bg=BG):
+        self.text = text
+        self.size = size
+        f = tkfont.Font(family=FONT, size=size, weight="bold")
+        width = f.measure(text) + s(18)
+        height = s(size * 1.5) + s(34)
+        super().__init__(parent, width=width, height=height, bg=bg,
+                         highlightthickness=0, bd=0)
+        self._cw, self._ch = width, height
+        self._animate()
+
+    def _animate(self):
+        try:
+            if not self.winfo_exists():
+                return
+            self._paint()
+        except Exception:
+            return
+        self.after(66, self._animate)
+
+    def _paint(self):
+        import math
+        self.delete("all")
+        w, h = self._cw, self._ch
+        text_y = s(self.size * 0.85) + s(4)
+        self.create_text(w / 2, text_y, text=self.text,
+                         fill=hsv_hex(now_hue(0.0, 0.08), 0.80, 1.0),
+                         font=(FONT, self.size, "bold"))
+        base_y = h - s(16)
+        for k in range(3):
+            amp = s(3) + k * s(1.4)
+            phase = _clock.perf_counter() * (2.4 + 0.6 * k) + k * 2.1
+            pts = []
+            for step in range(25):
+                x = s(3) + (step / 24) * (w - s(6))
+                y = base_y + k * s(4) + amp * math.sin(step * 0.75 + phase)
+                pts += [x, y]
+            self.create_line(*pts, smooth=True, width=max(2, s(2)),
+                             fill=hsv_hex(now_hue(k * 0.13, 0.10), 0.9, 0.95))
 
 
 def round_rect(canvas, x0, y0, x1, y1, r, **kw):
@@ -238,22 +354,39 @@ class Card(tk.Canvas):
         self.body = tk.Frame(self, bg=CARD)
         self._win = self.create_window(0, 0, window=self.body, anchor="nw")
         self._autosize = autosize and height is None
+        self._hue = (_clock.perf_counter() * 0.37) % 1.0
         self.bind("<Configure>", self._redraw)
         if self._autosize:
             self.body.bind("<Configure>", self._fit)
+        self._animate()
 
     def _fit(self, _event=None):
         want = self.body.winfo_reqheight() + 2
         if want > 12 and abs(want - int(self["height"])) > 1:
             self.configure(height=want)
 
+    def _animate(self):
+        try:
+            if not self.winfo_exists():
+                return
+            if self.winfo_width() > 2 and self.winfo_height() > 2:
+                self._paint(self.winfo_width(), self.winfo_height())
+        except Exception:
+            return
+        self.after(120, self._animate)
+
     def _redraw(self, event):
+        self._paint(event.width, event.height)
+
+    def _paint(self, w, h):
         self.delete("bg")
-        round_rect(self, 0, 0, event.width - 1, event.height - 1, 14,
+        edge = hsv_hex(now_hue(self._hue, 0.03), 0.75, 0.55)
+        round_rect(self, -1, -1, w, h, 15, outline=edge, tags="bg")
+        round_rect(self, 0, 0, w - 1, h - 1, 14,
                    fill=CARD, outline=LINE, tags="bg")
         self.tag_lower("bg")
         self.coords(self._win, 1, 1)
-        self.itemconfig(self._win, width=event.width - 2, height=event.height - 2)
+        self.itemconfig(self._win, width=w - 2, height=h - 2)
 
 
 class Toggle(tk.Canvas):
@@ -282,9 +415,12 @@ class Toggle(tk.Canvas):
     def _draw(self):
         self.delete("all")
         on = bool(self.var.get())
-        track = ACCENT if on else "#3a3a44"
-        round_rect(self, 1, 1, self.W - 1, self.H - 1, (self.H - 2) / 2,
-                   fill=track, outline=track)
+        if on:
+            gradient_rect(self, 1, 1, self.W - 1, self.H - 1,
+                          (self.H - 2) / 2, ACCENT, GRAD_B, steps=6)
+        else:
+            round_rect(self, 1, 1, self.W - 1, self.H - 1, (self.H - 2) / 2,
+                       fill="#33224f", outline="#33224f")
         r = (self.H - s(8)) / 2
         cx = (self.W - r - s(5)) if on else (r + s(5))
         cy = self.H / 2
@@ -322,14 +458,14 @@ class Segmented(tk.Canvas):
     def _draw(self):
         self.delete("all")
         round_rect(self, 0, 0, self._cw - 1, self._ch - 1, 9,
-                   fill="#101014", outline=LINE)
+                   fill="#120a20", outline=LINE)
         seg = self._cw / len(self.options)
         for i, opt in enumerate(self.options):
             x0 = i * seg
             active = self.var.get() == opt
             if active:
-                round_rect(self, x0 + 3, 3, x0 + seg - 3, self._ch - 3, 7,
-                           fill=ACCENT, outline=ACCENT)
+                gradient_rect(self, x0 + 3, 3, x0 + seg - 3, self._ch - 3, 7,
+                              ACCENT, GRAD_B, steps=6)
             label = self.labels.get(opt, opt.title())
             self.create_text(x0 + seg / 2, self._ch / 2,
                              text=label, fill=TEXT if active else MUTED,
@@ -397,16 +533,17 @@ class Wave(tk.Canvas):
         gap = 3
         bw = max(2, (self._cw - gap * (n - 1)) / n)
         mid = self._ch / 2
+        base = now_hue(0.0, 0.10)
         for i, lvl in enumerate(self.levels[-n:]):
             db = 20 * math.log10(max(lvl, 1e-6))
             frac = max(0.03, min(1.0, (db + 60) / 60))
             bh = max(2, frac * (self._ch - 10))
             x = i * (bw + gap)
             if self.active:
-                # fade older samples toward the accent colour
-                colour = ACCENT if frac > 0.3 else "#4b4b57"
+                colour = hsv_hex(base + (i / n) * 0.45, 0.85,
+                                 0.35 + 0.6 * frac)
             else:
-                colour = "#2c2c35"
+                colour = "#241a38"
             self.create_rectangle(x, mid - bh / 2, x + bw, mid + bh / 2,
                                   fill=colour, outline=colour)
 
@@ -449,12 +586,17 @@ class Button(tk.Canvas):
     def _draw(self):
         self.delete("all")
         if self.primary:
-            fill = "#8f72ff" if self._hover else ACCENT
+            lift = 0.18 if self._hover else 0.0
+            top = lerp_hex(ACCENT, "#ffffff", lift)
+            bot = lerp_hex(GRAD_B, "#ffffff", lift)
+            gradient_rect(self, 0, 0, self._cw - 1, self._ch - 1, 9,
+                          top, bot)
             fg = "#ffffff"
         else:
-            fill = CARD_HI if self._hover else "#202027"
+            fill = CARD_HI if self._hover else "#201233"
+            outline = ACCENT if self._hover else LINE
+            round_rect(self, 0, 0, self._cw - 1, self._ch - 1, 9,
+                       fill=fill, outline=outline)
             fg = TEXT
-        round_rect(self, 0, 0, self._cw - 1, self._ch - 1, 9,
-                   fill=fill, outline=fill)
         self.create_text(self._cw / 2, self._ch / 2, text=self.text, fill=fg,
                          font=(FONT, 9, "bold"))

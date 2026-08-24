@@ -266,7 +266,7 @@ class Dictation:
         # This display is 300% scaled, so the usable logical area is small -
         # ask for the ideal size but never exceed what the monitor can show.
         w, h = ui.fit_to_screen(root, ui.s(560), ui.s(600), margin=130)
-        root.geometry(f"{w}x{h}")
+        ui.place_centered(root, w, h)
         root.minsize(ui.s(500), min(ui.s(560), h))
         ui.dark_titlebar(root)
 
@@ -373,8 +373,7 @@ class Dictation:
         head.pack(fill="x")
         brand = tk.Frame(head, bg=ui.BG)
         brand.pack(side="left")
-        tk.Label(brand, text="Flow", bg=ui.BG, fg=ui.TEXT,
-                 font=(ui.FONT, 21, "bold"), anchor="w").pack(anchor="w")
+        ui.WavyTitle(brand, "Flow", size=22).pack(anchor="w")
         tk.Label(brand, text="Private voice typing", bg=ui.BG, fg=ui.MUTED,
                  font=(ui.FONT, 9), anchor="w").pack(anchor="w")
         hardware_text, hardware_colour = self._hardware_status()
@@ -457,7 +456,7 @@ class Dictation:
         box.pack(fill="both", expand=True)
         self.out = tk.Text(
             box.body, wrap="word", font=(ui.FONT, 10), bg=ui.CARD,
-            fg=ui.TEXT, relief="flat", insertbackground=ui.CARD, height=2,
+            fg=ui.TEXT, relief="flat", insertbackground=ui.TEXT, height=2,
             takefocus=0, state="disabled", cursor="arrow", padx=12,
             pady=10, highlightthickness=0,
         )
@@ -510,7 +509,7 @@ class Dictation:
         win.title("Flow settings")
         win.configure(bg=ui.BG)
         w, h = ui.fit_to_screen(win, ui.s(520), ui.s(590), margin=100)
-        win.geometry(f"{w}x{h}")
+        ui.place_centered(win, w, h)
         win.minsize(min(ui.s(470), w), min(ui.s(540), h))
         win.transient(self.root)
         ui.dark_titlebar(win)
@@ -833,7 +832,7 @@ class Dictation:
         win.title("Welcome to Flow" if first_run else "Personalize Flow")
         win.configure(bg=ui.BG)
         w, h = ui.fit_to_screen(win, ui.s(540), ui.s(700), margin=100)
-        win.geometry(f"{w}x{h}")
+        ui.place_centered(win, w, h)
         win.minsize(min(ui.s(490), w), min(ui.s(640), h))
         win.transient(self.root)
         ui.dark_titlebar(win)
@@ -883,7 +882,7 @@ class Dictation:
         self.personalize_status.pack(fill="x", padx=14, pady=(5, 8))
         self.voice_check_btn = tk.Button(
             check.body, text="Start voice check", command=self._toggle_voice_check,
-            bg=ui.ACCENT, fg="white", activebackground="#8f72ff",
+            bg=ui.ACCENT, fg="white", activebackground="#ff74e3",
             activeforeground="white", relief="flat", bd=0,
             font=(ui.FONT, 9, "bold"), cursor="hand2", padx=12, pady=6,
         )
@@ -1243,7 +1242,7 @@ class Dictation:
         win = tk.Toplevel(self.root)
         win.title("Correct last dictation")
         win.configure(bg=ui.BG)
-        win.geometry(f"{ui.s(520)}x{ui.s(360)}")
+        ui.place_centered(win, ui.s(520), ui.s(360))
         win.transient(self.root)
         ui.dark_titlebar(win)
         icon = Path(__file__).with_name("icon.ico")
