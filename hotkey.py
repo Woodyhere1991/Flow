@@ -369,19 +369,16 @@ class Dictation:
         wrap = tk.Frame(self.root, bg=ui.BG)
         wrap.pack(fill="both", expand=True, padx=18, pady=16)
 
+        ui.RainbowBand(wrap, "Flow", "Private voice typing").pack(fill="x")
+
         head = tk.Frame(wrap, bg=ui.BG)
-        head.pack(fill="x")
-        brand = tk.Frame(head, bg=ui.BG)
-        brand.pack(side="left")
-        ui.WavyTitle(brand, "Flow", size=22).pack(anchor="w")
-        tk.Label(brand, text="Private voice typing", bg=ui.BG, fg=ui.MUTED,
-                 font=(ui.FONT, 9), anchor="w").pack(anchor="w")
+        head.pack(fill="x", pady=(10, 0))
         hardware_text, hardware_colour = self._hardware_status()
         if hardware_text:
-            tk.Label(brand, text=hardware_text, bg=ui.BG, fg=hardware_colour,
-                     font=(ui.FONT, 8, "bold"), anchor="w").pack(anchor="w")
+            tk.Label(head, text=hardware_text, bg=ui.BG, fg=hardware_colour,
+                     font=(ui.FONT, 8, "bold"), anchor="w").pack(side="left")
         head_actions = tk.Frame(head, bg=ui.BG)
-        head_actions.pack(side="right", pady=(5, 0))
+        head_actions.pack(side="right")
         ui.Button(head_actions, "Personalize", self._open_personalize,
                   width=120, bg=ui.BG,
                   help_text=("Check your microphone and teach Flow how to "
@@ -393,13 +390,12 @@ class Dictation:
                                  side="left", padx=(8, 0))
 
         live = ui.Card(wrap)
-        live.pack(fill="x", pady=(16, 12))
-        tk.Label(live.body, text="SPEAK HERE", bg=ui.CARD, fg=ui.ACCENT_2,
-                 font=(ui.FONT, 8, "bold"), anchor="w").pack(
-                     fill="x", padx=18, pady=(15, 3))
+        live.pack(fill="x", pady=(12, 12))
+        ui.PlasmaStrip(live.body, text="SPEAK HERE").pack(
+            fill="x", padx=1, pady=(1, 0))
         tk.Label(live.body, text="Turn your voice into text", bg=ui.CARD,
                  fg=ui.TEXT, font=(ui.FONT, 15, "bold"), anchor="w").pack(
-                     fill="x", padx=18)
+                     fill="x", padx=18, pady=(10, 0))
         tk.Label(
             live.body,
             text="Click Start talking, speak naturally, then click Stop.",
@@ -448,9 +444,11 @@ class Dictation:
             anchor="w",
         ).pack(fill="x", padx=18, pady=(0, 9))
 
-        tk.Label(wrap, text="YOUR LATEST TEXT", bg=ui.BG, fg=ui.MUTED,
-                 font=(ui.FONT, 8, "bold"), anchor="w").pack(
-                     fill="x", pady=(4, 6))
+        latest_lbl = tk.Label(wrap, text="YOUR LATEST TEXT", bg=ui.BG,
+                              fg=ui.MUTED, font=(ui.FONT, 8, "bold"),
+                              anchor="w")
+        latest_lbl.pack(fill="x", pady=(4, 6))
+        ui.rainbow_label(latest_lbl, speed=0.05, sat=0.7, val=0.95)
 
         box = ui.Card(wrap)
         box.pack(fill="both", expand=True)
@@ -1157,6 +1155,7 @@ class Dictation:
         self.record_to_flow = True
         self.mode = TOGGLE
         self.talk_button.set_text("Stop and write")
+        self.talk_button.set_pulse(True)
         self._set_state("Listening - speak now", ui.REC)
         if self.show_overlay.get():
             self.overlay.show_listening()
@@ -1194,6 +1193,7 @@ class Dictation:
         self.record_to_flow = False
         if hasattr(self, "talk_button"):
             self.talk_button.set_text("Start talking")
+            self.talk_button.set_pulse(False)
 
     def _cancel_recording(self):
         """Throw away the in-flight recording (right-click the pill)."""
