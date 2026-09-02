@@ -37,6 +37,7 @@ import numpy as np
 import sounddevice as sd
 from pynput import keyboard
 
+import nzreo
 import ui
 import wintext
 from overlay import Overlay
@@ -230,6 +231,79 @@ def extract_simple_correction(original, corrected):
     if len(old_words) > 6 or len(new_words) > 6:
         return None
     return " ".join(old_words), " ".join(new_words)
+
+
+def _match_heard_case(heard, written):
+    """Give written the capitalisation of the words that were heard."""
+    if written[:1].islower() and heard[:1].isupper():
+        return written[:1].upper() + written[1:]
+    return written
+
+
+def _in_email(text, match):
+    """True when the match sits inside a word containing @ (an address)."""
+    token_start, token_end = match.start(), match.end()
+    while token_start and not text[token_start - 1].isspace():
+        token_start -= 1
+    while token_end < len(text) and not text[token_end].isspace():
+        token_end += 1
+    return "@" in text[token_start:token_end]
+
+
+def apply_nz_dictionary(text):
+    """Correct common mangling of te reo Māori words and NZ place names.
+
+    Runs before personal rules, so anything the user taught themselves
+    overrides a built-in one. Matching is case-insensitive like personal
+    rules, but a replacement keeps the capitalisation actually heard when
+    the correct form starts lowercase: "Whanau" becomes "Whānau", not
+    "whānau". Forms that are capitalised by convention (Māori, Taupō) are
+    always written that way.
+    """
+    # Exact phrases first, longest phrase first, for the same reason as
+    # apply_spoken_replacements.
+    for spoken, written in sorted(
+            nzreo.EXACT_REPLACEMENTS.items(),
+            key=lambda item: len(item[0]), reverse=True):
+        phrase = r"\s+".join(re.escape(word) for word in spoken.split())
+        if not phrase:
+            continue
+        text = re.sub(
+            rf"(?<!\w){phrase}(?!\w)",
+            lambda match, written=written: (
+                match.group(0) if _in_email(text, match) else
+                _match_heard_case(match.group(0), written)),
+            text, flags=re.IGNORECASE)
+
+    # Sound-alike matching for the mangles that cannot be listed. The
+    # guards mirror apply_personal_names: only unambiguous keys, a length
+    # close to the target, and never inside an email address.
+    by_sound = {}
+    for word in nzreo.SOUND_WORDS:
+        key = phonetic_key(word)
+        if len(key) >= 2:
+            by_sound.setdefault(key, []).append(word)
+    unambiguous = {
+        key: words[0] for key, words in by_sound.items()
+        if len({word.casefold() for word in words}) == 1
+    }
+
+    def replace(match):
+        heard = match.group(0)
+        target = unambiguous.get(phonetic_key(heard))
+        if not target or abs(len(heard) - len(target)) > 2:
+            return heard
+        if _in_email(text, match):
+            return heard
+        # A lowercase canon form never replaces a capitalised word: the
+        # model capitalises names in intended mode, so "Marie" the person
+        # is left alone while "marie" the mangled marae is corrected.
+        # Proper-noun canon forms (Tauranga) replace any capitalisation.
+        if target[:1].islower() and heard[:1].isupper():
+            return heard
+        return _match_heard_case(heard, target)
+
+    return re.sub(r"\b[A-Za-z][A-Za-z'-]*\b", replace, text)
 
 # The model supports these natively; this is not post-processing.
 #   verbatim - every word as spoken, including "um", stutters, [breath], [laugh]
@@ -1834,6 +1908,7 @@ class Dictation:
         self._reset_main_recording()
         self.last_insert_hwnd = None
         self.last_insert_time = 0.0
+        text = apply_nz_dictionary(text)
         text = apply_spoken_replacements(
             text, self.spoken_replacements, self.personal_names)
         self.last_text = text

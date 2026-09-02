@@ -96,6 +96,19 @@ Personal rules stay in `%LOCALAPPDATA%\Flow\settings.json`, outside OneDrive
 and outside the project folder. They are not uploaded to GitHub. The text is
 always copied too, so nothing is lost if Flow cannot type into another app.
 
+### New Zealand words
+
+Flow corrects common mangling of te reo Māori and New Zealand place names in
+every dictation. Words are written with their macrons (whānau, ngā mihi,
+kōrero, Māori, pōwhiri), place names take their official spellings (Taupō,
+Whakatāne, Whangārei, Ōpōtiki), and frequent mangles are repaired — "huanah"
+back to whānau, "marie" to marae, "Turnga" to Tauranga. A capitalised word is
+never replaced by a lowercase one, so the name **Marie** is safe, and words
+inside email addresses are left alone. Anything taught in Personalize
+overrides these built-ins. The list lives in `nzreo.py` and is meant to stay
+short and conservative: a wrong built-in correction is worse than a missing
+one, because users never see it happen.
+
 ### Writing style: Clean vs Word for word
 
 Both are native model capabilities, not text post-processing:
