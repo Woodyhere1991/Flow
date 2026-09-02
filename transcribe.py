@@ -14,6 +14,10 @@ import time
 import torch
 from crisperwhisper import CrisperWhisperModel
 
+# Same NZ dictionary the dictation app applies, so file transcripts get the
+# same te reo and place-name fixes (e.g. every mangling of Tauranga).
+from hotkey import apply_nz_dictionary
+
 
 def main():
     parser = argparse.ArgumentParser(description="Transcribe audio with CrisperWhisper")
@@ -56,7 +60,7 @@ def main():
     elapsed = time.perf_counter() - started
 
     print(f"\n--- Transcript ({elapsed:.1f}s) ---")
-    print(result.text)
+    print(apply_nz_dictionary(result.text))
 
     if args.timestamps:
         print("\n--- Word timings ---")
