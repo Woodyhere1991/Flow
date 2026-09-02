@@ -14,35 +14,27 @@ either **verbatim** (keeping every "um", stutter and false start) or
 The installer gets Python, Flow's AI components, and the default speech model.
 After setup finishes, normal dictation works offline.
 
-### Installer temporarily unavailable
+### Install from Releases (easiest)
 
-The first public installer was not digitally signed, so Windows showed
-**Unknown publisher**. It has been withdrawn rather than asking people to
-bypass a security warning. A normal one-click installer will return after it
-has a verified digital signature.
+Download **Flow-Setup.exe** from this repo's
+[Releases page](https://github.com/Woodyhere1991/Flow/releases), run it, and
+follow the prompts. It installs everything — Python, the AI engine, and the
+speech model recommended for your hardware (about 3 GB of downloads) — and puts
+a **Flow** shortcut on your Desktop.
 
-Setup checks each computer before large downloads begin:
+The installer is not digitally signed, so Windows may show **Windows protected
+your PC** / *Unknown publisher*. Click **More info → Run anyway**. That warning
+is expected until the installer has a verified signature.
 
-| Computer | Automatic setup |
-|---|---|
-| Supported NVIDIA graphics | CUDA acceleration + Turbo model |
-| No supported NVIDIA graphics | CPU engine + smaller Small model |
-| Low-memory or low-core CPU | Small model + a clear **may not be useful** warning |
-
-The installer asks before continuing with a CPU-only setup. Flow also shows the
-hardware result in the app. It never silently chooses the slow CPU engine when
-an NVIDIA card was detected but could not be enabled.
-
-For now, experienced users can inspect the public source and use the ZIP version:
+### Install from source
 
 ```bash
 git clone <this-repo-url>
 ```
 
 Open the folder and **double-click `Install Flow.bat`**. It creates an isolated
-environment, installs everything (about 3 GB of downloads), generates the icon
-and puts a **Flow** shortcut on the Desktop. It takes 5–15 minutes depending on
-your connection.
+environment, installs everything, generates the icon and puts a **Flow**
+shortcut on the Desktop. It takes 5–15 minutes depending on your connection.
 
 The speech model recommended for that computer downloads during setup, not on
 first launch. Choosing a different model later may require internet once.
@@ -168,6 +160,22 @@ into memory. Every one after that is faster.
 
 ## Microphone setup
 
+### RESOLVED 2026-08-24: the dropouts were the USB port, not Flow
+
+The intermittent microphone failures on this PC ("Insufficient memory
+[PaErrorCode -9992]", "no input device found even after rescanning", streams
+that opened but never sent audio) had one root cause: the **Bluetooth dongle
+was plugged into a non-USB 3.0 port**. Moving it to a **USB 3.0 port** fixed
+everything — the headset now connects reliably and those errors have stopped
+completely. If Flow reports microphone problems again, check the dongle's USB
+port *first*.
+
+The defensive code added while the cause was unknown (device rescanning,
+warm-up handling) is deliberately kept: it is genuinely useful for any flaky
+or slow-to-wake connection.
+
+### Bluetooth mode
+
 Bluetooth headsets run in one of two modes, and only one of them has a mic:
 
 | Mode | Sound quality | Mic |
@@ -185,7 +193,10 @@ better, if you plan to do this often.
 
 ### If it doesn't hear you
 
-Click **Test mic** and watch the meter while you talk. It shows a live level in
+First, make sure the Bluetooth dongle is in a **USB 3.0 port** — see the
+resolution note above.
+
+Then click **Test mic** and watch the meter while you talk. It shows a live level in
 dB — green is good, amber is quiet but usable, red means no signal.
 
 Two things were fixed after the first attempt at this, both worth knowing:

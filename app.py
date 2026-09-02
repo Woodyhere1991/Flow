@@ -345,8 +345,10 @@ class App:
             messagebox.showerror(
                 "Could not open microphone",
                 f"{type(exc).__name__}: {exc}\n\n"
-                "If this is a Bluetooth headset, Windows must switch it to "
-                "'Hands-Free' mode before the mic works. See README.md.",
+                "If this is a Bluetooth headset, plug its USB dongle into a "
+                "USB 3.0 port (blue tab) - that fixes most connection "
+                "problems. Windows must also switch it to 'Hands-Free' mode "
+                "before the mic works. See README.md.",
             )
             return False
 
@@ -364,7 +366,9 @@ class App:
             messagebox.showerror(
                 "Microphone not responding",
                 "The mic opened but never sent any audio.\n\n"
-                "Try a different entry in the Mic dropdown, or hit Refresh.",
+                "If this is a Bluetooth headset, try its USB dongle in a "
+                "USB 3.0 port (blue tab), then Refresh. Also try a different "
+                "entry in the Mic dropdown.",
             )
             return False
 
