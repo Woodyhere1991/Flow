@@ -170,7 +170,7 @@ powershell -NoProfile -Command ^
   "$w=New-Object -ComObject WScript.Shell;" ^
   "$s=$w.CreateShortcut([Environment]::GetFolderPath('Desktop')+'\Flow.lnk');" ^
   "$s.TargetPath='%CD%\venv\Scripts\pythonw.exe';" ^
-  "$s.Arguments='\"%CD%\hotkey.py\"';" ^
+  "$s.Arguments='\"%CD%\flow_watchdog.py\"';" ^
   "$s.WorkingDirectory='%CD%';" ^
   "$s.IconLocation='%CD%\icon.ico';" ^
   "$s.Save()"

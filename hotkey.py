@@ -266,7 +266,7 @@ class Dictation:
         # This display is 300% scaled, so the usable logical area is small -
         # ask for the ideal size but never exceed what the monitor can show.
         w, h = ui.fit_to_screen(root, ui.s(560), ui.s(600), margin=130)
-        root.geometry(f"{w}x{h}")
+        ui.place_centered(root, w, h)
         root.minsize(ui.s(500), min(ui.s(560), h))
         ui.dark_titlebar(root)
 
@@ -332,11 +332,14 @@ class Dictation:
         self.auto_paste = tk.BooleanVar(value=saved.get("auto_paste", True))
         self.text_mode = tk.StringVar(value=saved.get("mode", "intended"))
         self.show_overlay = tk.BooleanVar(value=saved.get("show_overlay", True))
+        self.overlay_topmost = tk.BooleanVar(
+            value=saved.get("overlay_topmost", True))
         saved_size = saved.get("size", self.recommended_size)
         self.size = tk.StringVar(
             value=saved_size if saved_size in SIZES else self.recommended_size)
         self.at_startup = tk.BooleanVar(value=STARTUP_LINK.exists())
-        for var in (self.auto_paste, self.text_mode, self.show_overlay, self.size):
+        for var in (self.auto_paste, self.text_mode, self.show_overlay,
+                    self.overlay_topmost, self.size):
             var.trace_add("write", lambda *_: self._save_settings())
         self.at_startup.trace_add("write", lambda *_: self._apply_startup())
 
@@ -344,10 +347,15 @@ class Dictation:
             root,
             on_cancel=self._cancel_recording,
             on_toggle=self._toggle_overlay_recording,
+            on_hide=self._hide_overlay_from_pill,
+            on_toggle_topmost=self._toggle_overlay_topmost,
         )
         self.overlay.set_idle_enabled(self.show_overlay.get())
+        self.overlay.set_topmost(self.overlay_topmost.get())
         self.show_overlay.trace_add(
             "write", lambda *_: self._overlay_setting_changed())
+        self.overlay_topmost.trace_add(
+            "write", lambda *_: self._overlay_topmost_changed())
 
         self._build_ui()
         self.root.after(80, self._drain)
@@ -362,19 +370,19 @@ class Dictation:
     # ---------------------------------------------------------------- UI ----
     def _build_ui(self):
         self.root.configure(bg=ui.BG)
+        ui.style_ttk(self.root)
         icon = Path(__file__).with_name("icon.ico")
         if icon.exists():
             ui.set_window_icon(self.root, icon)
 
         wrap = tk.Frame(self.root, bg=ui.BG)
-        wrap.pack(fill="both", expand=True, padx=18, pady=16)
+        wrap.pack(fill="both", expand=True, padx=16, pady=12)
 
         head = tk.Frame(wrap, bg=ui.BG)
         head.pack(fill="x")
         brand = tk.Frame(head, bg=ui.BG)
         brand.pack(side="left")
-        tk.Label(brand, text="Flow", bg=ui.BG, fg=ui.TEXT,
-                 font=(ui.FONT, 21, "bold"), anchor="w").pack(anchor="w")
+        ui.WavyTitle(brand, "Flow", size=22).pack(anchor="w")
         tk.Label(brand, text="Private voice typing", bg=ui.BG, fg=ui.MUTED,
                  font=(ui.FONT, 9), anchor="w").pack(anchor="w")
         hardware_text, hardware_colour = self._hardware_status()
@@ -393,19 +401,21 @@ class Dictation:
                              "and what happens when Windows starts.")).pack(
                                  side="left", padx=(8, 0))
 
-        live = ui.Card(wrap)
-        live.pack(fill="x", pady=(16, 12))
+        ui.Rule(wrap).pack(fill="x", pady=(10, 0))
+
+        live = ui.Card(wrap, accent=ui.ACCENT)
+        live.pack(fill="x", pady=(12, 10))
         tk.Label(live.body, text="SPEAK HERE", bg=ui.CARD, fg=ui.ACCENT_2,
                  font=(ui.FONT, 8, "bold"), anchor="w").pack(
-                     fill="x", padx=18, pady=(15, 3))
+                     fill="x", padx=14, pady=(11, 3))
         tk.Label(live.body, text="Turn your voice into text", bg=ui.CARD,
                  fg=ui.TEXT, font=(ui.FONT, 15, "bold"), anchor="w").pack(
-                     fill="x", padx=18)
+                     fill="x", padx=14)
         tk.Label(
             live.body,
             text="Click Start talking, speak naturally, then click Stop.",
             bg=ui.CARD, fg=ui.MUTED, font=(ui.FONT, 9), anchor="w",
-        ).pack(fill="x", padx=18, pady=(3, 10))
+        ).pack(fill="x", padx=14, pady=(3, 9))
 
         self.talk_button = ui.Button(
             live.body, "Start talking", self._toggle_main_recording,
@@ -413,25 +423,24 @@ class Dictation:
             help_text=("Start listening through your microphone. Click again "
                        "to stop and turn your speech into text."),
         )
-        self.talk_button.pack(anchor="w", padx=18)
+        self.talk_button.pack(anchor="w", padx=14)
 
         status = tk.Frame(live.body, bg=ui.CARD)
-        status.pack(fill="x", padx=18, pady=(10, 0))
-        self.status_dot = tk.Canvas(status, width=10, height=10, bg=ui.CARD,
-                                    highlightthickness=0)
-        self.status_dot.pack(side="left", pady=(4, 0))
+        status.pack(fill="x", padx=14, pady=(9, 0))
+        self.status_dot = ui.Dot(status, size=13, bg=ui.CARD)
+        self.status_dot.pack(side="left", pady=(3, 0))
         self.state_lbl = tk.Label(status, text="Starting Flow...", bg=ui.CARD,
                                   fg=ui.MUTED, font=(ui.FONT, 9), anchor="w")
         self.state_lbl.pack(side="left", padx=8, fill="x", expand=True)
 
         self.wave = ui.Wave(live.body, height=28)
-        self.wave.pack(fill="x", padx=18, pady=(4, 9))
+        self.wave.pack(fill="x", padx=14, pady=(4, 5))
 
         anywhere = ui.Card(wrap)
-        anywhere.pack(fill="x", pady=(0, 12))
+        anywhere.pack(fill="x", pady=(0, 10))
         tk.Label(anywhere.body, text="TYPE INTO ANY APP", bg=ui.CARD,
                  fg=ui.MUTED, font=(ui.FONT, 8, "bold"), anchor="w").pack(
-                     fill="x", padx=18, pady=(13, 3))
+                     fill="x", padx=14, pady=(10, 3))
         tk.Label(
             anywhere.body,
             text="1. Click where you want the words to appear.\n"
@@ -439,25 +448,25 @@ class Dictation:
                  "3. Let go when you are finished.",
             bg=ui.CARD, fg=ui.TEXT, font=(ui.FONT, 9), anchor="w",
             justify="left",
-        ).pack(fill="x", padx=18)
+        ).pack(fill="x", padx=14)
         keys = ui.KeyCaps(anywhere.body, ["Ctrl", "Windows"], height=34)
-        keys.pack(fill="x", padx=16, pady=(4, 2))
+        keys.pack(fill="x", padx=12, pady=(4, 2))
         tk.Label(
             anywhere.body,
             text="Hands-free: tap these keys twice. Tap once to stop.",
             bg=ui.CARD, fg=ui.ACCENT_2, font=(ui.FONT, 8, "bold"),
             anchor="w",
-        ).pack(fill="x", padx=18, pady=(0, 9))
+        ).pack(fill="x", padx=14, pady=(0, 6))
 
         tk.Label(wrap, text="YOUR LATEST TEXT", bg=ui.BG, fg=ui.MUTED,
                  font=(ui.FONT, 8, "bold"), anchor="w").pack(
-                     fill="x", pady=(4, 6))
+                     fill="x", pady=(2, 5))
 
-        box = ui.Card(wrap)
+        box = ui.Card(wrap, accent=ui.ACCENT_2)
         box.pack(fill="both", expand=True)
         self.out = tk.Text(
             box.body, wrap="word", font=(ui.FONT, 10), bg=ui.CARD,
-            fg=ui.TEXT, relief="flat", insertbackground=ui.CARD, height=2,
+            fg=ui.TEXT, relief="flat", insertbackground=ui.TEXT, height=1,
             takefocus=0, state="disabled", cursor="arrow", padx=12,
             pady=10, highlightthickness=0,
         )
@@ -467,7 +476,7 @@ class Dictation:
         self.out.config(state="disabled")
 
         row = tk.Frame(wrap, bg=ui.BG)
-        row.pack(fill="x", pady=(10, 0))
+        row.pack(fill="x", pady=(8, 0))
         ui.Button(row, "Copy text", self._copy_last, primary=True,
                   width=115, bg=ui.BG,
                   help_text="Copy your latest dictated text so you can paste it elsewhere.").pack(side="left")
@@ -481,7 +490,7 @@ class Dictation:
         tk.Label(
             wrap, text="Tip: Point at any button to see what it does.",
             bg=ui.BG, fg=ui.MUTED, font=(ui.FONT, 8), anchor="w",
-        ).pack(fill="x", pady=(5, 0))
+        ).pack(fill="x", pady=(4, 0))
 
         # Kept so existing code that writes to self.meter keeps working.
         self.meter = tk.Label(wrap, bg=ui.BG, fg=ui.BG, text="")
@@ -509,9 +518,9 @@ class Dictation:
         self.settings_window = win
         win.title("Flow settings")
         win.configure(bg=ui.BG)
-        w, h = ui.fit_to_screen(win, ui.s(520), ui.s(590), margin=100)
-        win.geometry(f"{w}x{h}")
-        win.minsize(min(ui.s(470), w), min(ui.s(540), h))
+        w, h = ui.fit_to_screen(win, ui.s(520), ui.s(640), margin=100)
+        ui.place_centered(win, w, h)
+        win.minsize(min(ui.s(470), w), min(ui.s(580), h))
         win.transient(self.root)
         ui.dark_titlebar(win)
         icon = Path(__file__).with_name("icon.ico")
@@ -611,7 +620,11 @@ class Dictation:
             "Used for both keyboard and floating-microphone dictation.", first=True)
         self._switch_row(
             opts.body, "Keep the mouse microphone on screen", self.show_overlay,
-            "Click the floating microphone to start or stop without the keyboard.")
+            "Click the floating microphone to start or stop. Right-click it to hide it.")
+        self._switch_row(
+            opts.body, "Keep the mouse microphone above other windows",
+            self.overlay_topmost,
+            "Double-click the floating microphone to let other windows cover it.")
         self._switch_row(
             opts.body, "Open Flow when Windows starts", self.at_startup,
             "Flow will be ready whenever you sign in.")
@@ -633,6 +646,18 @@ class Dictation:
     def _overlay_setting_changed(self):
         if hasattr(self, "overlay"):
             self.overlay.set_idle_enabled(self.show_overlay.get())
+
+    def _overlay_topmost_changed(self):
+        if hasattr(self, "overlay"):
+            self.overlay.set_topmost(self.overlay_topmost.get())
+
+    def _hide_overlay_from_pill(self):
+        """Right-click while idle: same as turning the overlay off in Settings."""
+        self.show_overlay.set(False)
+
+    def _toggle_overlay_topmost(self):
+        """Double-click: keep the pill, but let other windows sit over it."""
+        self.overlay_topmost.set(not self.overlay_topmost.get())
 
     def _microphone_choices(self):
         """Return simple, stable microphone choices without driver duplicates."""
@@ -802,6 +827,7 @@ class Dictation:
                 "auto_paste": self.auto_paste.get(),
                 "mode": self.text_mode.get(),
                 "show_overlay": self.show_overlay.get(),
+                "overlay_topmost": self.overlay_topmost.get(),
                 "size": self.size.get(),
                 "input_device_name": self.input_device_name,
                 "input_hostapi": self.input_hostapi,
@@ -833,7 +859,7 @@ class Dictation:
         win.title("Welcome to Flow" if first_run else "Personalize Flow")
         win.configure(bg=ui.BG)
         w, h = ui.fit_to_screen(win, ui.s(540), ui.s(700), margin=100)
-        win.geometry(f"{w}x{h}")
+        ui.place_centered(win, w, h)
         win.minsize(min(ui.s(490), w), min(ui.s(640), h))
         win.transient(self.root)
         ui.dark_titlebar(win)
@@ -881,17 +907,13 @@ class Dictation:
             wraplength=ui.s(440), justify="left",
         )
         self.personalize_status.pack(fill="x", padx=14, pady=(5, 8))
-        self.voice_check_btn = tk.Button(
-            check.body, text="Start voice check", command=self._toggle_voice_check,
-            bg=ui.ACCENT, fg="white", activebackground="#8f72ff",
-            activeforeground="white", relief="flat", bd=0,
-            font=(ui.FONT, 9, "bold"), cursor="hand2", padx=12, pady=6,
+        self.voice_check_btn = ui.Button(
+            check.body, "Start voice check", self._toggle_voice_check,
+            primary=True, width=150,
+            help_text=("Record a short sample to check whether Flow can hear "
+                       "you clearly."),
         )
         self.voice_check_btn.pack(anchor="w", padx=14, pady=(0, 12))
-        ui.Tooltip(
-            self.voice_check_btn,
-            "Record a short sample to check whether Flow can hear you clearly.",
-        )
 
         teach = ui.Card(wrap)
         teach.pack(fill="both", expand=True)
@@ -932,14 +954,14 @@ class Dictation:
         tk.Label(teach.body, text="If Flow hears:", bg=ui.CARD, fg=ui.TEXT,
                  font=(ui.FONT, 8), anchor="w").pack(fill="x", padx=14)
         self.heard_entry = tk.Entry(
-            teach.body, bg="#101014", fg=ui.TEXT, insertbackground=ui.TEXT,
+            teach.body, bg=ui.FIELD, fg=ui.TEXT, insertbackground=ui.TEXT,
             relief="flat", font=(ui.FONT, 9),
         )
         self.heard_entry.pack(fill="x", padx=14, pady=(3, 7), ipady=5)
         tk.Label(teach.body, text="It should type:", bg=ui.CARD, fg=ui.TEXT,
                  font=(ui.FONT, 8), anchor="w").pack(fill="x", padx=14)
         self.written_entry = tk.Entry(
-            teach.body, bg="#101014", fg=ui.TEXT, insertbackground=ui.TEXT,
+            teach.body, bg=ui.FIELD, fg=ui.TEXT, insertbackground=ui.TEXT,
             relief="flat", font=(ui.FONT, 9),
         )
         self.written_entry.pack(fill="x", padx=14, pady=(3, 7), ipady=5)
@@ -959,7 +981,7 @@ class Dictation:
                   help_text="Delete the highlighted saved phrase from Flow.").pack(side="left", padx=8)
 
         self.phrase_list = tk.Listbox(
-            teach.body, bg="#101014", fg=ui.TEXT, selectbackground=ui.ACCENT,
+            teach.body, bg=ui.FIELD, fg=ui.TEXT, selectbackground=ui.ACCENT,
             selectforeground="white", relief="flat", bd=0,
             font=(ui.FONT, 8), height=5, activestyle="none",
         )
@@ -1062,7 +1084,8 @@ class Dictation:
                 return
             with self.lock:
                 self.personalize_mark = self.total
-            self.voice_check_btn.config(text="Stop voice check", bg=ui.REC)
+            self.voice_check_btn.set_text("Stop voice check")
+            self.voice_check_btn.set_tone(ui.REC)
             self.personalize_status.config(
                 text="Listening... read the sentence, then click Stop.",
                 fg=ui.TEXT)
@@ -1071,7 +1094,8 @@ class Dictation:
         mark, self.personalize_mark = self.personalize_mark, None
         self._stop_stream()
         audio = self._grab(mark)
-        self.voice_check_btn.config(text="Start voice check", bg=ui.ACCENT)
+        self.voice_check_btn.set_text("Start voice check")
+        self.voice_check_btn.set_tone(None)
         if len(audio) / RATE < 0.5:
             self.personalize_status.config(
                 text="That was too short. Try once more.", fg=ui.WARN)
@@ -1158,6 +1182,7 @@ class Dictation:
         self.record_to_flow = True
         self.mode = TOGGLE
         self.talk_button.set_text("Stop and write")
+        self.talk_button.set_tone(ui.REC)
         self._set_state("Listening - speak now", ui.REC)
         if self.show_overlay.get():
             self.overlay.show_listening()
@@ -1195,9 +1220,10 @@ class Dictation:
         self.record_to_flow = False
         if hasattr(self, "talk_button"):
             self.talk_button.set_text("Start talking")
+            self.talk_button.set_tone(None)
 
     def _cancel_recording(self):
-        """Throw away the in-flight recording (right-click the pill)."""
+        """Throw away the in-flight recording (right-click the pill while listening)."""
         if self.mode in (PTT, TOGGLE):
             self.mode = IDLE
             self.mark = None
@@ -1213,8 +1239,7 @@ class Dictation:
             "#666": ui.MUTED, None: ui.MUTED,
         }.get(colour, colour or ui.MUTED)
         self.state_lbl.config(text=text, fg=mapped)
-        self.status_dot.delete("all")
-        self.status_dot.create_oval(1, 1, 9, 9, fill=mapped, outline=mapped)
+        self.status_dot.set(mapped)
 
     def _copy_last(self):
         if self.last_text:
@@ -1243,7 +1268,7 @@ class Dictation:
         win = tk.Toplevel(self.root)
         win.title("Correct last dictation")
         win.configure(bg=ui.BG)
-        win.geometry(f"{ui.s(520)}x{ui.s(360)}")
+        ui.place_centered(win, ui.s(520), ui.s(360))
         win.transient(self.root)
         ui.dark_titlebar(win)
         icon = Path(__file__).with_name("icon.ico")
@@ -1425,6 +1450,9 @@ class Dictation:
             return True
         except Exception as exc:
             log.warning("could not start the microphone: %s", exc)
+            # Most common cause on this PC (resolved 2026-08-24): the Bluetooth
+            # dongle was in a non-USB 3.0 port. Worth checking first.
+            log.info("if this repeats, move the Bluetooth dongle to a USB 3.0 port")
             self._stop_stream(clear_buffers=True)
             self.mic_error = str(exc)
             # The cached device list may be stale - a device that has gone away

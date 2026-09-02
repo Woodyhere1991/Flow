@@ -1,10 +1,13 @@
 r"""
-Floating status pill, always on top of every window.
+Floating status pill. It can sit above every window, or drop behind them.
 
 The hard requirement is that it must NEVER take keyboard focus. Dictation
 pastes into whatever window is focused, so an overlay that activated itself
 when shown would steal focus and the text would land in the overlay's own
 process instead of the user's app. WS_EX_NOACTIVATE is what prevents that.
+
+Click starts or stops dictation, drag moves it, right-click hides it (or
+cancels an in-flight recording), and double-click lets other windows cover it.
 """
 
 import ctypes
@@ -27,6 +30,7 @@ SW_SHOWNOACTIVATE = 4
 
 GA_ROOT = 2
 HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
 SWP_NOSIZE = 0x0001
 SWP_NOMOVE = 0x0002
 SWP_NOACTIVATE = 0x0010
@@ -44,45 +48,61 @@ user32.SetWindowPos.argtypes = [wintypes.HWND, wintypes.HWND, ctypes.c_int,
                                 ctypes.c_int, ctypes.c_int, ctypes.c_int,
                                 wintypes.UINT]
 user32.SetWindowPos.restype = wintypes.BOOL
+user32.GetDoubleClickTime.restype = wintypes.UINT
 
 # Deliberately small and wordless. This sits on top of whatever the user is
 # typing into, so it shows only that it is listening - never how many words it
 # wrote, which would cover the very text they are dictating.
-BARS = 11
-PILL_W = 84
-PILL_H = 24
+BARS = 13
+PILL_W = 92
+PILL_H = 26
 
-BG = "#17171c"
-EDGE = "#33333d"
+BG = "#171029"
+BG_TOP = "#241640"      # the pill is lit from above, like a real object
+EDGE = "#3B2870"
+EDGE_TOP = "#5B3FA8"
 
 # The window itself is always a rectangle; painting it this colour and marking
 # that colour transparent is what leaves only the pill shape visible. It must
 # be a colour used nowhere else in the drawing.
 TRANSPARENT = "#ff00ff"
-FG = "#f4f4f6"
-DIM = "#5a5a66"
-ACCENT = "#7c5cff"
-REC = "#ff453a"
-OK = "#32d74b"
-BUSY = "#ffd60a"
+FG = "#f4eeff"
+DIM = "#8878B0"
+ACCENT = "#ff5ad8"
+REC = "#ff5c74"
+OK = "#4cefa6"
+BUSY = "#ffc94a"
+
+
+def _double_click_ms():
+    """Wait just long enough to tell a click from a double-click."""
+    try:
+        return min(350, max(200, int(user32.GetDoubleClickTime())))
+    except Exception:
+        return 280
 
 
 class Overlay:
-    """A small always-on-top pill showing mic state. Never takes focus."""
+    """A small pill showing mic state. Never takes focus."""
 
-    def __init__(self, root, on_cancel=None, on_toggle=None):
+    def __init__(self, root, on_cancel=None, on_toggle=None,
+                 on_hide=None, on_toggle_topmost=None):
         self.root = root
         self.on_cancel = on_cancel
         self.on_toggle = on_toggle
+        self.on_hide = on_hide
+        self.on_toggle_topmost = on_toggle_topmost
         self.levels = [0.0] * BARS
         self.state = "hidden"
         self.idle_enabled = False
+        self.topmost = True
         self.hovered = False
         self._phase = 0
         self._drag = None
         self._drag_start_xy = None
         self._drag_moved = False
         self._hide_job = None
+        self._click_job = None
 
         self.win = tk.Toplevel(root)
         self.win.overrideredirect(True)          # no title bar or border
@@ -106,7 +126,7 @@ class Overlay:
         self.canvas.bind("<Button-1>", self._drag_start)
         self.canvas.bind("<B1-Motion>", self._drag_move)
         self.canvas.bind("<ButtonRelease-1>", self._drag_end)
-        self.canvas.bind("<Button-3>", lambda _e: self._cancel())
+        self.canvas.bind("<Button-3>", self._right_click)
 
         self._place_default()
         self.win.update_idletasks()
@@ -166,8 +186,37 @@ class Overlay:
         self._drag = None
         self._drag_start_xy = None
         self._drag_moved = False
-        if clicked and self.on_toggle:
+        if not clicked:
+            return
+        if self._click_job is not None:
+            # Second click arrived before the first one fired: treat as a
+            # double-click so we do not start then immediately stop recording.
+            self._cancel_pending_click()
+            if self.on_toggle_topmost:
+                self.on_toggle_topmost()
+            return
+        self._click_job = self.root.after(_double_click_ms(), self._fire_click)
+
+    def _fire_click(self):
+        self._click_job = None
+        if self.on_toggle:
             self.on_toggle()
+
+    def _cancel_pending_click(self):
+        if self._click_job is not None:
+            try:
+                self.root.after_cancel(self._click_job)
+            except Exception:
+                pass
+            self._click_job = None
+
+    def _right_click(self, _event=None):
+        self._cancel_pending_click()
+        if self.state == "listening":
+            self._cancel()
+            return
+        if self.on_hide:
+            self.on_hide()
 
     def _cancel(self):
         if self.on_cancel:
@@ -181,6 +230,16 @@ class Overlay:
             self.show_idle()
         elif not self.idle_enabled:
             self.hide()
+
+    def set_topmost(self, enabled):
+        """Pin above every window, or let ordinary windows cover the pill."""
+        self.topmost = bool(enabled)
+        try:
+            self.win.attributes("-topmost", self.topmost)
+        except Exception:
+            pass
+        if self.state != "hidden" and getattr(self, "_hwnd", None):
+            self._apply_z_order()
 
     def show_idle(self):
         if not self.idle_enabled:
@@ -230,6 +289,7 @@ class Overlay:
 
     def hide(self):
         self._cancel_hide()
+        self._cancel_pending_click()
         self.state = "hidden"
         user32.ShowWindow(self._hwnd, SW_HIDE)
 
@@ -246,7 +306,11 @@ class Overlay:
         # which yanks focus off whatever the user is typing into. ShowWindow
         # with SW_SHOWNOACTIVATE displays it without ever making it foreground.
         user32.ShowWindow(self._hwnd, SW_SHOWNOACTIVATE)
-        user32.SetWindowPos(self._hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+        self._apply_z_order()
+
+    def _apply_z_order(self):
+        insert = HWND_TOPMOST if self.topmost else HWND_NOTOPMOST
+        user32.SetWindowPos(self._hwnd, insert, 0, 0, 0, 0,
                             SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
 
     # ------------------------------------------------------------ render ----
@@ -270,14 +334,28 @@ class Overlay:
         # corners are invisible - only the rounded shape shows on screen.
         c.create_rectangle(0, 0, w, h, fill=TRANSPARENT, outline=TRANSPARENT)
 
+        # A capsule with a top-lit body. Tk cannot anti-alias, so instead of
+        # fighting the jaggies the shape is built from a stack of thin
+        # horizontal bands that shade from BG_TOP down to BG - the eye reads
+        # the shading, not the edge.
         r = h / 2
         c.create_oval(0, 0, h - 1, h - 1, fill=BG, outline=EDGE)
         c.create_oval(w - h, 0, w - 1, h - 1, fill=BG, outline=EDGE)
         c.create_rectangle(r, 0, w - r, h - 1, fill=BG, outline=BG)
-        c.create_line(r, 0, w - r, 0, fill=EDGE)
+        bands = 7
+        for i in range(bands):
+            t = i / (bands - 1)
+            y0 = 1 + t * (h - 3) * 0.55
+            c.create_rectangle(r, y0, w - r, y0 + (h - 3) * 0.55 / bands + 1,
+                               fill=ui.lerp_hex(BG_TOP, BG, t), outline="")
+        c.create_line(r, 0, w - r, 0, fill=EDGE_TOP)
         c.create_line(r, h - 1, w - r, h - 1, fill=EDGE)
+        c.create_arc(0, 0, h - 1, h - 1, start=90, extent=80, style="arc",
+                     outline=EDGE_TOP)
+        c.create_arc(w - h, 0, w - 1, h - 1, start=10, extent=80, style="arc",
+                     outline=EDGE_TOP)
 
-        pad = ui.s(11)
+        pad = ui.s(12)
         if self.state == "idle":
             self._draw_mic(c, w, h)
         elif self.state == "listening":
@@ -287,46 +365,62 @@ class Overlay:
         elif self.state in ("done", "warn"):
             # No wording - just a brief tint, then it disappears on its own.
             colour = OK if self.state == "done" else BUSY
-            cx, cy, rr = w / 2, h / 2, ui.s(4)
-            c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr,
-                          fill=colour, outline=colour)
+            cx, cy = w / 2, h / 2
+            for rr, blend in ((ui.s(8), 0.22), (ui.s(6), 0.5), (ui.s(4), 1.0)):
+                fill = colour if blend == 1.0 else ui.lerp_hex(BG, colour, blend)
+                c.create_oval(cx - rr, cy - rr, cx + rr, cy + rr,
+                              fill=fill, outline="")
 
     def _draw_mic(self, c, w, h):
-        """Small microphone affordance; brightens when it is ready to click."""
+        """Small microphone affordance; lights up when it is ready to click."""
         colour = ACCENT if self.hovered else DIM
         cx = w / 2
-        top = ui.s(5)
-        bottom = h - ui.s(8)
+        top = ui.s(6)
+        bottom = h - ui.s(9)
         half = ui.s(3)
+        if self.hovered:
+            # A faint bloom so hovering feels like the mic is powering on.
+            c.create_oval(cx - ui.s(9), h / 2 - ui.s(9),
+                          cx + ui.s(9), h / 2 + ui.s(9),
+                          fill=ui.lerp_hex(BG, colour, 0.20), outline="")
         c.create_oval(cx - half, top, cx + half, bottom,
                       fill=colour, outline=colour)
+        c.create_oval(cx - half + ui.s(1), top + ui.s(1),
+                      cx + half - ui.s(1), top + ui.s(4),
+                      fill=ui.lerp_hex(colour, "#ffffff", 0.45), outline="")
         c.create_arc(cx - ui.s(6), top + ui.s(3), cx + ui.s(6),
-                     h - ui.s(4), start=180, extent=180,
-                     style="arc", outline=colour, width=max(1, ui.s(1)))
-        c.create_line(cx, h - ui.s(6), cx, h - ui.s(3),
-                      fill=colour, width=max(1, ui.s(1)))
-        c.create_line(cx - ui.s(4), h - ui.s(3), cx + ui.s(4),
-                      h - ui.s(3), fill=colour, width=max(1, ui.s(1)))
+                     h - ui.s(5), start=180, extent=180,
+                     style="arc", outline=colour, width=max(1, ui.s(1.4)))
+        c.create_line(cx, h - ui.s(7), cx, ui.s(0) + h - ui.s(4),
+                      fill=colour, width=max(1, ui.s(1.4)))
+        c.create_line(cx - ui.s(4), h - ui.s(4), cx + ui.s(4),
+                      h - ui.s(4), fill=colour, width=max(1, ui.s(1.4)),
+                      capstyle="round")
 
     def _draw_wave(self, c, x0, x1, h, live):
-        """Thin centred bars. When not live, they shimmer to show work happening."""
+        """Centred bars with rounded caps and a soft bloom behind each one."""
         n = BARS
         span = x1 - x0
         step = span / n
-        bw = max(ui.s(2), step * 0.55)
+        bw = max(ui.s(2), step * 0.5)
         mid = h / 2
         for i in range(n):
-            x = x0 + i * step
+            x = x0 + i * step + bw / 2
             if live:
                 lvl = self.levels[-n:][i] if i < len(self.levels[-n:]) else 0.0
                 # Log scale: linear amplitude is invisible at speech levels.
                 db = 20 * math.log10(max(lvl, 1e-6))
                 frac = max(0.10, min(1.0, (db + 60) / 60))
-                colour = ACCENT if frac > 0.25 else DIM
+                colour = ui.ribbon(ui.now_hue((i / n) * 0.5, 0.045))
             else:
                 # travelling ripple while transcribing
                 frac = 0.25 + 0.35 * (1 + math.sin((i - self._phase * 0.9) / 1.6)) / 2
-                colour = ACCENT
-            bh = max(ui.s(2), frac * (h - ui.s(12)))
-            c.create_rectangle(x, mid - bh / 2, x + bw, mid + bh / 2,
-                               fill=colour, outline=colour)
+                colour = ui.ribbon(ui.now_hue(self._phase * 0.008, 0.05))
+            bh = max(ui.s(2), frac * (h - ui.s(13)))
+            c.create_line(x, mid - bh / 2, x, mid + bh / 2,
+                          fill=ui.lerp_hex(BG, colour, 0.30),
+                          width=bw + ui.s(2), capstyle="round")
+            c.create_line(x, mid - bh / 2, x, mid + bh / 2,
+                          fill=ui.lerp_hex(colour, "#ffffff",
+                                           0.08 + 0.22 * frac),
+                          width=bw, capstyle="round")
