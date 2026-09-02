@@ -1566,10 +1566,26 @@ class Dictation:
                 self.chunks.clear()
                 self.total = self.dropped = 0
             device = self._preferred_input_device()
-            self.stream = sd.InputStream(
-                samplerate=RATE, channels=1, dtype="float32",
-                callback=cb, latency="low", device=device,
-            )
+            try:
+                self.stream = sd.InputStream(
+                    samplerate=RATE, channels=1, dtype="float32",
+                    callback=cb, latency="low", device=device,
+                )
+            except Exception:
+                # A saved microphone can fail to open even while it is still
+                # listed: an MME entry, for instance, cannot run at 16 kHz
+                # even though the same microphone's WASAPI entry can. Retrying
+                # once on the Windows default keeps dictation alive instead of
+                # failing forever on a selection that cannot work.
+                if device is None:
+                    raise
+                log.warning("microphone %r (%s) failed to open - retrying "
+                            "on the Windows default",
+                            self.input_device_name, self.input_hostapi)
+                self.stream = sd.InputStream(
+                    samplerate=RATE, channels=1, dtype="float32",
+                    callback=cb, latency="low", device=None,
+                )
             self.stream.start()
 
             # A Bluetooth stream can report itself active well before it sends
