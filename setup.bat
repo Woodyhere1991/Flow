@@ -57,7 +57,10 @@ rem ---- keep the running app in a permanent local folder ---------------------
 echo   [1/7] Preparing Flow...
 if /i "%SOURCE_DIR_TRIMMED%"=="%APP_DIR%" goto :copy_done
 if not exist "%APP_DIR%" mkdir "%APP_DIR%"
-robocopy "%SOURCE_DIR%" "%APP_DIR%" /E /R:1 /W:1 /XD venv .git __pycache__ /XF settings.json *.wav *.mp3 *.m4a >nul
+rem %SOURCE_DIR% ends in a backslash; inside quotes that escapes the closing
+rem quote (\"), merging every argument into one and failing robocopy. Use the
+rem trimmed form, which has no trailing backslash.
+robocopy "%SOURCE_DIR_TRIMMED%" "%APP_DIR%" /E /R:1 /W:1 /XD venv .git __pycache__ /XF settings.json *.wav *.mp3 *.m4a >nul
 if errorlevel 8 goto :fail
 :copy_done
 cd /d "%APP_DIR%"
