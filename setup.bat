@@ -2,7 +2,13 @@
 setlocal EnableExtensions
 set "SOURCE_DIR=%~dp0"
 set "SOURCE_DIR_TRIMMED=%SOURCE_DIR:~0,-1%"
-set "APP_DIR=%LOCALAPPDATA%\Flow\app"
+rem Install location can be overridden by presetting FLOW_INSTALL_DIR (no
+rem trailing backslash) - e.g. to install in place inside a checkout.
+if defined FLOW_INSTALL_DIR (
+  set "APP_DIR=%FLOW_INSTALL_DIR%"
+) else (
+  set "APP_DIR=%LOCALAPPDATA%\Flow\app"
+)
 cd /d "%SOURCE_DIR%"
 
 echo.
