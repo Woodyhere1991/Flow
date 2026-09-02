@@ -122,6 +122,21 @@ Both are native model capabilities, not text post-processing:
 `[laugh]` and similar. **Clean** gives you what you meant to say, with
 punctuation tidied.
 
+### Engines: English or multilingual
+
+Settings offers two speech engines:
+
+- **English (word for word)** — CrisperWhisper, the default. Best English
+  accuracy, the only engine with true verbatim transcription, and the fastest
+  startup.
+- **Multilingual** — Whisper large-v3-turbo via faster-whisper. Understands
+  te reo Māori and 98 other languages, and detects the language
+  automatically, so English and te reo mix freely in one sentence. Clean text
+  only — no word-for-word mode. Its model is permissively licensed, which
+  matters if Flow is ever distributed commercially (see PRODUCT_RESEARCH.md);
+  CrisperWhisper's weights are non-commercial. The first switch downloads the
+  model once (~1.6 GB); dictation is offline after that.
+
 ### Speed
 
 Measured on an NVIDIA RTX 4060 with weights already cached:

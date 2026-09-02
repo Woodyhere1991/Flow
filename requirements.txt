@@ -17,3 +17,7 @@ pynput>=1.8               # global Ctrl+Win hotkey
 comtypes>=1.4             # UI Automation (focused-field detection)
 pillow>=10                # icon generation
 numpy>=1.26
+
+# Second dictation engine (see whisper_engine.py): multilingual Whisper
+# large-v3-turbo via CTranslate2. Works with the pinned ctranslate2 above.
+faster-whisper==1.2.1

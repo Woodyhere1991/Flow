@@ -34,6 +34,7 @@ EXACT_REPLACEMENTS = {
 
     # Observed mangles of te reo words (seen in dictation testing).
     "huanah": "whānau",
+    "huana": "whānau",
 
     # Macron restoration. "Māori" keeps its capital: NZ English writes the
     # people and the language with one, like "English".

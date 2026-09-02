@@ -327,6 +327,22 @@ SIZE_HELP = {
     "large": "Most accurate, but takes longer.",
 }
 
+# Dictation engines. "crisper" specialises in verbatim English; "whisper"
+# is the multilingual engine (te reo Māori, Chinese, 99 languages) with a
+# permissively licensed model. See whisper_engine.py for the differences.
+ENGINES = ("crisper", "whisper")
+ENGINE_LABELS = {
+    "crisper": "English (word for word)",
+    "whisper": "Multilingual",
+}
+ENGINE_HELP = {
+    "crisper": "Best for English. The only engine with true word-for-word "
+               "transcription (every um, stutter and false start).",
+    "whisper": "Understands te reo Māori and 99 languages, and detects "
+               "the language automatically. Clean text only - no "
+               "word-for-word mode. Freely licensed model.",
+}
+
 STARTUP_DIR = Path(os.environ.get("APPDATA", "")) / \
     r"Microsoft\Windows\Start Menu\Programs\Startup"
 STARTUP_LINK = STARTUP_DIR / "Flow Dictation.lnk"
@@ -411,9 +427,12 @@ class Dictation:
         saved_size = saved.get("size", self.recommended_size)
         self.size = tk.StringVar(
             value=saved_size if saved_size in SIZES else self.recommended_size)
+        saved_engine = saved.get("engine", "crisper")
+        self.engine = tk.StringVar(
+            value=saved_engine if saved_engine in ENGINES else "crisper")
         self.at_startup = tk.BooleanVar(value=STARTUP_LINK.exists())
         for var in (self.auto_paste, self.text_mode, self.show_overlay,
-                    self.overlay_topmost, self.size):
+                    self.overlay_topmost, self.size, self.engine):
             var.trace_add("write", lambda *_: self._save_settings())
         self.at_startup.trace_add("write", lambda *_: self._apply_startup())
 
@@ -437,7 +456,8 @@ class Dictation:
         self.root.after(1200, self._maybe_open_setup)
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        threading.Thread(target=self._load_model, args=(self.size.get(),),
+        threading.Thread(target=self._load_model,
+                         args=(self.size.get(), self.engine.get()),
                          daemon=True).start()
         self._start_hotkeys()
 
@@ -663,6 +683,24 @@ class Dictation:
         )
         self.mode_hint.pack(fill="x", padx=16, pady=(6, 11))
 
+        language = ui.Card(wrap)
+        language.pack(fill="x", pady=(0, 10))
+        tk.Label(language.body, text="ENGINE", bg=ui.CARD,
+                 fg=ui.MUTED, font=(ui.FONT, 8, "bold"), anchor="w").pack(
+                     fill="x", padx=16, pady=(13, 6))
+        ui.Segmented(
+            language.body, ENGINES, self.engine, width=330,
+            command=self._engine_changed, labels=ENGINE_LABELS,
+            help_text=("The speech engine. English (word for word) is best "
+                       "for everyday English; Multilingual also understands "
+                       "te reo Māori and other languages."),
+        ).pack(padx=14, anchor="w")
+        self.engine_hint = tk.Label(
+            language.body, bg=ui.CARD, fg=ui.MUTED, font=(ui.FONT, 8),
+            anchor="w", text=self._engine_help(self.engine.get()),
+        )
+        self.engine_hint.pack(fill="x", padx=16, pady=(6, 11))
+
         accuracy = ui.Card(wrap)
         accuracy.pack(fill="x", pady=(0, 10))
         tk.Label(accuracy.body, text="SPEED AND ACCURACY", bg=ui.CARD,
@@ -793,18 +831,35 @@ class Dictation:
                 fg=ui.REC,
             )
 
+    def _engine_changed(self):
+        self._save_settings()
+        self.engine_hint.config(text=self._engine_help(self.engine.get()))
+        if getattr(self, "loaded_engine", None) == self.engine.get():
+            return
+        self.loading_model = True
+        self.model = None
+        self._stop_stream(clear_buffers=True)
+        self._set_state("Switching engine...", ui.WARN)
+        threading.Thread(
+            target=self._load_model,
+            args=(self.size.get(), self.engine.get()),
+            daemon=True).start()
+
     def _size_changed(self):
         self.hardware_choice_confirmed = True
         self._save_settings()
         self.size_hint.config(text=self._size_help(self.size.get()))
-        if getattr(self, "loaded_size", None) == self.size.get():
+        if (getattr(self, "loaded_size", None) == self.size.get()
+                and getattr(self, "loaded_engine", None) == self.engine.get()):
             return
         self.loading_model = True
         self.model = None
         self._stop_stream(clear_buffers=True)
         self._set_state("Switching model...", ui.WARN)
-        threading.Thread(target=self._load_model, args=(self.size.get(),),
-                         daemon=True).start()
+        threading.Thread(
+            target=self._load_model,
+            args=(self.size.get(), self.engine.get()),
+            daemon=True).start()
 
     def _show_transcript(self, text):
         """Write into the read-only transcript box."""
@@ -872,6 +927,13 @@ class Dictation:
             return f"{status}. Flow recommends the {self.recommended_size} model."
         return "Flow is already set up. Change these only if you want to."
 
+    def _engine_help(self, engine):
+        hint = ENGINE_HELP[engine]
+        if engine == "whisper":
+            return (f"{hint} It may need internet once to download the "
+                    "model.")
+        return hint
+
     def _size_help(self, size):
         if size == self.recommended_size:
             return f"Recommended for this computer. {SIZE_HELP[size]}"
@@ -903,6 +965,7 @@ class Dictation:
                 "show_overlay": self.show_overlay.get(),
                 "overlay_topmost": self.overlay_topmost.get(),
                 "size": self.size.get(),
+                "engine": self.engine.get(),
                 "input_device_name": self.input_device_name,
                 "input_hostapi": self.input_hostapi,
                 "personal_names": sorted(self.personal_names),
@@ -1184,9 +1247,14 @@ class Dictation:
         tmp = Path(tempfile.gettempdir()) / "flow_voice_check.wav"
         try:
             sf.write(str(tmp), audio, RATE)
-            result = self.model.transcribe(str(tmp), language="en",
-                                           mode="intended")
-            self.events.put(("voice_check", result.text.strip()))
+            if getattr(self, "loaded_engine", "crisper") == "whisper":
+                import whisper_engine
+                text = whisper_engine.transcribe(self.model, str(tmp), "en")
+                self.events.put(("voice_check", text))
+            else:
+                result = self.model.transcribe(str(tmp), language="en",
+                                               mode="intended")
+                self.events.put(("voice_check", result.text.strip()))
         except Exception as exc:
             self.events.put(("voice_check_error", str(exc)))
         finally:
@@ -1446,21 +1514,31 @@ class Dictation:
         self._busy_since = time.perf_counter() if value else 0.0
 
     # -------------------------------------------------------------- model ----
-    def _load_model(self, size):
-        # size is passed in, never read from the Tk variable here: Tk variables
-        # may only be touched from the thread running the main loop.
+    def _load_model(self, size, engine):
+        # size/engine are passed in, never read from the Tk variables here:
+        # Tk variables may only be touched from the thread running the main
+        # loop.
         self.loading_model = True
         try:
-            import torch
-            from crisperwhisper import CrisperWhisperModel
             profile_device = self.hardware_profile.get("device")
-            use_cuda = torch.cuda.is_available() and profile_device != "cpu"
-            device = "cuda" if use_cuda else "cpu"
-            where = torch.cuda.get_device_name(0) if device == "cuda" else "CPU"
-            self.events.put(("state", (f"Loading {size} on {where}...", "#c80")))
-            # backend="transformers" is required on Windows - see README.
-            self.model = CrisperWhisperModel(size, device=device,
-                                             backend="transformers")
+            if engine == "whisper":
+                import whisper_engine
+                self.events.put(("state", ("Loading Whisper multilingual...",
+                                           "#c80")))
+                self.model = whisper_engine.load_model(profile_device)
+            else:
+                import torch
+                from crisperwhisper import CrisperWhisperModel
+                use_cuda = torch.cuda.is_available() and profile_device != "cpu"
+                device = "cuda" if use_cuda else "cpu"
+                where = (torch.cuda.get_device_name(0) if device == "cuda"
+                         else "CPU")
+                self.events.put(("state", (f"Loading {size} on {where}...",
+                                           "#c80")))
+                # backend="transformers" is required on Windows - see README.
+                self.model = CrisperWhisperModel(size, device=device,
+                                                 backend="transformers")
+            self.loaded_engine = engine
             self.loaded_size = size
             # WDM-KS Bluetooth microphones must be opened from the main Windows
             # thread. Let the UI event loop refresh and open the device.
@@ -1888,9 +1966,18 @@ class Dictation:
             if self.model is None:
                 raise RuntimeError("the speech model is not loaded yet")
             sf.write(str(tmp), audio, RATE)
-            # mode is a native model capability, not post-processing.
-            result = self.model.transcribe(str(tmp), language="en", mode=mode)
-            self.events.put(("text", result.text.strip()))
+            if getattr(self, "loaded_engine", "crisper") == "whisper":
+                # The multilingual engine detects the language per clip, so
+                # English and te reo Māori mix freely in one sentence. It has
+                # no verbatim mode; its natural output is clean text.
+                import whisper_engine
+                text = whisper_engine.transcribe(self.model, str(tmp), None)
+                self.events.put(("text", text))
+            else:
+                # mode is a native model capability, not post-processing.
+                result = self.model.transcribe(str(tmp), language="en",
+                                               mode=mode)
+                self.events.put(("text", result.text.strip()))
         except Exception as exc:
             log.exception("transcription failed")
             self.events.put(("state", (f"Failed: {exc}", "#b00")))

@@ -28,7 +28,17 @@ def main():
         choices=["large", "medium", "small", "turbo"],
         help="Model size. Smaller = faster, less accurate (default: large)",
     )
-    parser.add_argument("--language", default="en", help="Language code (default: en)")
+    parser.add_argument(
+        "--engine",
+        default="crisper",
+        choices=["crisper", "whisper"],
+        help="Speech engine: crisper for verbatim English, whisper for "
+             "multilingual (te reo Maori and 98 other languages)",
+    )
+    parser.add_argument(
+        "--language", default="en",
+        help="Language code (default: en; 'auto' with --engine whisper "
+             "detects it per clip)")
     parser.add_argument(
         "--timestamps",
         action="store_true",
@@ -48,19 +58,30 @@ def main():
     # Stock ctranslate2 is installed purely to satisfy an unconditional import
     # in crisperwhisper/hallucination.py - leaving backend on "auto" would make
     # it wrongly select CT2 and fail on the missing fork APIs.
-    model = CrisperWhisperModel(args.model, device=device, backend="transformers")
-
-    print(f"Transcribing {args.audio}...")
     started = time.perf_counter()
-    result = model.transcribe(
-        args.audio,
-        language=args.language,
-        word_timestamps=args.timestamps,
-    )
+    if args.engine == "whisper":
+        import whisper_engine
+        model = whisper_engine.load_model(
+            "cpu" if device == "cpu" else "auto")
+        language = None if args.language == "auto" else args.language
+        print(f"Transcribing {args.audio}...")
+        text = whisper_engine.transcribe(model, args.audio, language)
+        if args.timestamps:
+            print("(word timings are not available on the whisper engine)")
+    else:
+        model = CrisperWhisperModel(
+            args.model, device=device, backend="transformers")
+        print(f"Transcribing {args.audio}...")
+        result = model.transcribe(
+            args.audio,
+            language=args.language,
+            word_timestamps=args.timestamps,
+        )
+        text = result.text
     elapsed = time.perf_counter() - started
 
     print(f"\n--- Transcript ({elapsed:.1f}s) ---")
-    print(apply_nz_dictionary(result.text))
+    print(apply_nz_dictionary(text))
 
     if args.timestamps:
         print("\n--- Word timings ---")
