@@ -55,7 +55,10 @@ EXACT_REPLACEMENTS = {
     "turangawaewae": "tūrangawaewae",
 
     # Place names - capitalised, macrons where the official name has them.
-    "taupo": "Taupō",
+    # NOT included: "taupo" -> Taupo with macron. The everyday English word
+    # "top" is often heard as "taupo", and turning "top" into a place name
+    # (seen in real dictation: "go over the Taupo of all the apps") is far
+    # worse than an unmacroned place name.
     "whakatane": "Whakatāne",
     "whangarei": "Whangārei",
     "kaikoura": "Kaikōura",
@@ -64,15 +67,15 @@ EXACT_REPLACEMENTS = {
     "oamaru": "Ōamaru",
 }
 
-# Matched by sound, not spelling. Lowercase entries (marae) only ever
-# replace a lowercase word, so the name "Marie" is left alone; capitalised
-# entries are proper nouns and match any capitalisation.
+# Matched by sound, not spelling, for mangles that cannot be listed. The
+# phonetic key is crude: it keeps only consonants, so an entry is only safe
+# when NO common English word shares its key. Removed after real collisions:
+#   marae (marry, merry)         Tauranga (turning, training)
+#   Rotorua (artery)             Papamoa (pompom)
+#   Whangarei (whinger)          Taupo (top)
+# A wrong built-in correction is worse than a missing one - users never see
+# it happen. If a new word is needed, check its consonant skeleton against
+# common English words first.
 SOUND_WORDS = [
-    "marae",
-    "Tauranga",
-    "Rotorua",
-    "Papamoa",
     "Whakatāne",
-    "Whangārei",
-    "Taupō",
 ]

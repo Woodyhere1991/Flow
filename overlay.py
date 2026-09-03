@@ -324,6 +324,14 @@ class Overlay:
         self._phase += 1
         if self.state != "hidden":
             self._render()
+            # Windows stacks topmost windows by recency: any other app that
+            # asks for the same privilege after us sits above the pill, and a
+            # one-shot topmost at show time slowly loses. Re-asserting every
+            # few seconds keeps it above everything without stealing focus
+            # (SWP_NOACTIVATE), and only while the user has not deliberately
+            # let other windows cover it.
+            if self.topmost and self._phase % 40 == 0:
+                self._apply_z_order()
 
     def _render(self):
         c = self.canvas
