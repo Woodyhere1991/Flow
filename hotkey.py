@@ -38,6 +38,7 @@ import sounddevice as sd
 from pynput import keyboard
 
 import nzreo
+import sounds
 import ui
 import wintext
 from overlay import Overlay
@@ -420,6 +421,8 @@ class Dictation:
         self.hardware_choice_confirmed = bool(
             saved.get("hardware_choice_confirmed", False))
         self.auto_paste = tk.BooleanVar(value=saved.get("auto_paste", True))
+        self.dictation_sounds = tk.BooleanVar(
+            value=saved.get("dictation_sounds", True))
         self.text_mode = tk.StringVar(value=saved.get("mode", "intended"))
         self.show_overlay = tk.BooleanVar(value=saved.get("show_overlay", True))
         self.overlay_topmost = tk.BooleanVar(
@@ -432,7 +435,8 @@ class Dictation:
             value=saved_engine if saved_engine in ENGINES else "crisper")
         self.at_startup = tk.BooleanVar(value=STARTUP_LINK.exists())
         for var in (self.auto_paste, self.text_mode, self.show_overlay,
-                    self.overlay_topmost, self.size, self.engine):
+                    self.overlay_topmost, self.size, self.engine,
+                    self.dictation_sounds):
             var.trace_add("write", lambda *_: self._save_settings())
         self.at_startup.trace_add("write", lambda *_: self._apply_startup())
 
@@ -731,6 +735,10 @@ class Dictation:
             opts.body, "Type into the app I am using", self.auto_paste,
             "Used for both keyboard and floating-microphone dictation.", first=True)
         self._switch_row(
+            opts.body, "Play start and stop sounds", self.dictation_sounds,
+            "A small blip when recording starts and another when it stops, "
+            "so you know Flow is listening without looking at the screen.")
+        self._switch_row(
             opts.body, "Keep the mouse microphone on screen", self.show_overlay,
             "Click the floating microphone to start or stop. Right-click it to hide it.")
         self._switch_row(
@@ -961,6 +969,7 @@ class Dictation:
             APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
             SETTINGS_PATH.write_text(json.dumps({
                 "auto_paste": self.auto_paste.get(),
+                "dictation_sounds": self.dictation_sounds.get(),
                 "mode": self.text_mode.get(),
                 "show_overlay": self.show_overlay.get(),
                 "overlay_topmost": self.overlay_topmost.get(),
@@ -1302,6 +1311,16 @@ class Dictation:
         except Exception as exc:
             self._set_state(f"Startup change failed: {exc}", ui.WARN)
 
+    def _sound_start(self):
+        """Earcon when recording starts, if the user has sounds on."""
+        if self.dictation_sounds.get():
+            sounds.play_start()
+
+    def _sound_stop(self):
+        """Earcon when a recording is handed to the engine."""
+        if self.dictation_sounds.get():
+            sounds.play_stop()
+
     def _toggle_main_recording(self):
         """Start or stop the beginner-friendly recording on the main screen."""
         if self.busy:
@@ -1313,10 +1332,13 @@ class Dictation:
         if self.model is None:
             self._set_state("Flow is still starting. Try again in a moment.", ui.WARN)
             return
-        if not self._ensure_microphone():
-            return
         if self.mode != IDLE:
             self._set_state("Finish the current recording first.", ui.WARN)
+            return
+        # The blip plays before the microphone opens, so it can never be
+        # captured as part of the dictation.
+        self._sound_start()
+        if not self._ensure_microphone():
             return
 
         with self.lock:
@@ -1349,6 +1371,7 @@ class Dictation:
         # WS_EX_NOACTIVATE keeps the pill from becoming the foreground window,
         # so this remains the app the user was typing into before the click.
         self._capture_target()
+        self._sound_start()
         if not self._ensure_microphone():
             return
         with self.lock:
@@ -1878,6 +1901,8 @@ class Dictation:
         if self.model is None:
             self._set_state("Flow is still starting. Try again in a moment.", ui.WARN)
             return
+        # Blip before the microphone opens so it stays out of the recording.
+        self._sound_start()
         if not self._ensure_microphone():
             return
         self.combo_armed = True
@@ -1914,6 +1939,10 @@ class Dictation:
         now = time.perf_counter()
         if now - self.last_tap <= DOUBLE_TAP_WINDOW:
             self.last_tap = 0.0
+            # The stream stayed warm from the first tap, so this blip can
+            # bleed into the clip's first fraction of a second; both engines
+            # drop non-speech, which is why the tones are so short and quiet.
+            self._sound_start()
             with self.lock:
                 self.mark = self.total
             self.mode = TOGGLE
@@ -1935,6 +1964,7 @@ class Dictation:
             return
 
         self._stop_stream()
+        self._sound_stop()
         audio = self._grab(mark)
         secs = len(audio) / RATE
         if secs < MIN_CLIP_SECONDS:
