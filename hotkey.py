@@ -555,6 +555,16 @@ class Dictation:
             bg=ui.CARD, fg=ui.ACCENT_2, font=(ui.FONT, 8, "bold"),
             anchor="w",
         ).pack(fill="x", padx=14, pady=(0, 6))
+        # Only packed while the floating microphone is hidden - see
+        # _refresh_pill_button. Recovering from an accidental right-click
+        # on the pill must not require a trip through Settings.
+        self.show_pill_button = ui.Button(
+            anywhere.body, "Show the floating microphone",
+            self._show_overlay_again, width=250, height=32,
+            help_text=("You hid the floating microphone - a right-click on it "
+                       "does that. Click here to bring it back."),
+        )
+        self._refresh_pill_button()
 
         tk.Label(wrap, text="YOUR LATEST TEXT", bg=ui.BG, fg=ui.MUTED,
                  font=(ui.FONT, 8, "bold"), anchor="w").pack(
@@ -763,9 +773,22 @@ class Dictation:
     def _mode_changed(self):
         self.mode_hint.config(text=MODE_HELP[self.text_mode.get()])
 
+    def _show_overlay_again(self):
+        self.show_overlay.set(True)
+
+    def _refresh_pill_button(self):
+        """Keep the main-window recovery button in step with the pill."""
+        if not hasattr(self, "show_pill_button"):
+            return
+        if self.show_overlay.get():
+            self.show_pill_button.pack_forget()
+        else:
+            self.show_pill_button.pack(fill="x", padx=14, pady=(2, 8))
+
     def _overlay_setting_changed(self):
         if hasattr(self, "overlay"):
             self.overlay.set_idle_enabled(self.show_overlay.get())
+        self._refresh_pill_button()
 
     def _overlay_topmost_changed(self):
         if hasattr(self, "overlay"):
