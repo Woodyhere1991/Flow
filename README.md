@@ -71,8 +71,8 @@ For mouse-only dictation, hover over the small microphone pill near the bottom
 of the screen. Click it once, wait for the red waveform, and speak. Click it
 again to stop and type the result into the app you were using. Drag the pill to
 move it. Right-click while idle to hide it, or right-click while recording to
-cancel. Double-click to let other windows cover it; double-click again to keep
-it on top. If you hide it, the main window shows a **Show the floating
+cancel. The pill always stays above other windows unless you switch that off
+in Settings. If you hide it, the main window shows a **Show the floating
 microphone** button that brings it back.
 
 If Windows cannot find a microphone, Flow clearly says **No microphone

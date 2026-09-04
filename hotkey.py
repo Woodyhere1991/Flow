@@ -445,7 +445,6 @@ class Dictation:
             on_cancel=self._cancel_recording,
             on_toggle=self._toggle_overlay_recording,
             on_hide=self._hide_overlay_from_pill,
-            on_toggle_topmost=self._toggle_overlay_topmost,
         )
         self.overlay.set_idle_enabled(self.show_overlay.get())
         self.overlay.set_topmost(self.overlay_topmost.get())
@@ -797,10 +796,6 @@ class Dictation:
     def _hide_overlay_from_pill(self):
         """Right-click while idle: same as turning the overlay off in Settings."""
         self.show_overlay.set(False)
-
-    def _toggle_overlay_topmost(self):
-        """Double-click: keep the pill, but let other windows sit over it."""
-        self.overlay_topmost.set(not self.overlay_topmost.get())
 
     def _microphone_choices(self):
         """Return simple, stable microphone choices without driver duplicates."""

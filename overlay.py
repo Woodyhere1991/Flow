@@ -86,12 +86,11 @@ class Overlay:
     """A small pill showing mic state. Never takes focus."""
 
     def __init__(self, root, on_cancel=None, on_toggle=None,
-                 on_hide=None, on_toggle_topmost=None):
+                 on_hide=None):
         self.root = root
         self.on_cancel = on_cancel
         self.on_toggle = on_toggle
         self.on_hide = on_hide
-        self.on_toggle_topmost = on_toggle_topmost
         self.levels = [0.0] * BARS
         self.state = "hidden"
         self.idle_enabled = False
@@ -189,11 +188,14 @@ class Overlay:
         if not clicked:
             return
         if self._click_job is not None:
-            # Second click arrived before the first one fired: treat as a
-            # double-click so we do not start then immediately stop recording.
+            # Second click arrived before the first one fired. This used to
+            # toggle stay-on-top, but an accidental double-click while simply
+            # trying to dictate silently dropped the pill behind other
+            # windows - it happened twice in real use. A double-click now
+            # behaves as one click; the Settings switch is the only way to
+            # change topmost.
             self._cancel_pending_click()
-            if self.on_toggle_topmost:
-                self.on_toggle_topmost()
+            self._fire_click()
             return
         self._click_job = self.root.after(_double_click_ms(), self._fire_click)
 
