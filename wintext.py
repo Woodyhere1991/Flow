@@ -75,6 +75,7 @@ VK_SHIFT = 0x10
 VK_MENU = 0x12  # Alt
 VK_V = 0x56
 VK_Z = 0x5A
+VK_RETURN = 0x0D
 
 KEYEVENTF_KEYUP = 0x0002
 KEYEVENTF_UNICODE = 0x0004
@@ -322,6 +323,13 @@ def send_paste():
     """Send Ctrl+V to the focused window."""
     return _send(_key(VK_CONTROL), _key(VK_V),
                  _key(VK_V, up=True), _key(VK_CONTROL, up=True))
+
+
+def send_enter():
+    """Send Enter after pasted text has had time to arrive."""
+    release_modifiers()
+    time.sleep(0.06)
+    return _send(_key(VK_RETURN), _key(VK_RETURN, up=True))
 
 
 def undo_in_window(target_hwnd):

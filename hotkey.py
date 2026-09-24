@@ -29,18 +29,20 @@ import sys
 import threading
 import time
 import tkinter as tk
+import urllib.request
 from collections import deque
 from pathlib import Path
 from tkinter import messagebox, ttk
 
 import numpy as np
 import sounddevice as sd
-from pynput import keyboard
+from pynput import keyboard, mouse
 
 import nzreo
 import sounds
 import ui
 import wintext
+import text_target
 from overlay import Overlay
 
 APP_DATA_DIR = Path(os.environ.get(
@@ -393,6 +395,8 @@ class Dictation:
         self.last_insert_time = 0.0
         self.ambient = 0.0      # room noise sampled while each mic stream wakes
         self.target_hwnd = None  # window that was focused when dictation began
+        self.text_target = None  # exact editable field captured for this turn
+        self._conv_watch_job = None
         self.personalize_window = None
         self.personalize_mark = None
         self.settings_window = None
@@ -421,6 +425,12 @@ class Dictation:
         self.hardware_choice_confirmed = bool(
             saved.get("hardware_choice_confirmed", False))
         self.auto_paste = tk.BooleanVar(value=saved.get("auto_paste", True))
+        self.conversation_submit = tk.BooleanVar(value=saved.get("conversation_submit", False))
+        self.conversation_loop = tk.BooleanVar(value=saved.get("conversation_loop", False))
+        self._conv_wait = None
+        self._conv_tts_ids = None
+        self._conv_gate_until = 0.0
+        self._conv_last_piece_at = 0.0
         self.dictation_sounds = tk.BooleanVar(
             value=saved.get("dictation_sounds", True))
         self.text_mode = tk.StringVar(value=saved.get("mode", "intended"))
@@ -434,7 +444,8 @@ class Dictation:
         self.engine = tk.StringVar(
             value=saved_engine if saved_engine in ENGINES else "crisper")
         self.at_startup = tk.BooleanVar(value=STARTUP_LINK.exists())
-        for var in (self.auto_paste, self.text_mode, self.show_overlay,
+        for var in (self.auto_paste, self.conversation_submit,
+                    self.conversation_loop, self.text_mode, self.show_overlay,
                     self.overlay_topmost, self.size, self.engine,
                     self.dictation_sounds):
             var.trace_add("write", lambda *_: self._save_settings())
@@ -748,6 +759,12 @@ class Dictation:
             "A small blip when recording starts and another when it stops, "
             "so you know Flow is listening without looking at the screen.")
         self._switch_row(
+            opts.body, "Send dictated text automatically", self.conversation_submit,
+            "Press Enter after Flow types your words. Use only in the chat box.")
+        self._switch_row(
+            opts.body, "Keep conversation mode listening", self.conversation_loop,
+            "Start listening again after each completed dictation. Turn it off with Ctrl+Win.")
+        self._switch_row(
             opts.body, "Keep the mouse microphone on screen", self.show_overlay,
             "Click the floating microphone to start or stop. Right-click it to hide it.")
         self._switch_row(
@@ -987,6 +1004,8 @@ class Dictation:
             APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
             SETTINGS_PATH.write_text(json.dumps({
                 "auto_paste": self.auto_paste.get(),
+                "conversation_submit": self.conversation_submit.get(),
+                "conversation_loop": self.conversation_loop.get(),
                 "dictation_sounds": self.dictation_sounds.get(),
                 "mode": self.text_mode.get(),
                 "show_overlay": self.show_overlay.get(),
@@ -1160,7 +1179,12 @@ class Dictation:
         win.protocol("WM_DELETE_WINDOW", self._close_personalize)
 
     def _close_personalize(self):
+        if self.personalize_mark is not None:
+            self._stop_stream(clear_buffers=True)
         self.personalize_mark = None
+        if self.mode == IDLE and not self.busy:
+            self._set_state("Ready to listen", ui.GOOD)
+            self.overlay.return_to_idle()
         if self.personalize_window:
             self.personalize_window.destroy()
         self.personalize_window = None
@@ -1253,6 +1277,9 @@ class Dictation:
             self.personalize_status.config(
                 text="Listening... read the sentence, then click Stop.",
                 fg=ui.TEXT)
+            self._set_state("Listening - voice check", ui.REC)
+            if self.show_overlay.get():
+                self.overlay.show_listening()
             return
 
         mark, self.personalize_mark = self.personalize_mark, None
@@ -1260,6 +1287,8 @@ class Dictation:
         audio = self._grab(mark)
         self.voice_check_btn.set_text("Start voice check")
         self.voice_check_btn.set_tone(None)
+        self._set_state("Ready to listen", ui.GOOD)
+        self.overlay.return_to_idle()
         if len(audio) / RATE < 0.5:
             self.personalize_status.config(
                 text="That was too short. Try once more.", fg=ui.WARN)
@@ -1885,6 +1914,26 @@ class Dictation:
         self.listener.daemon = True
         self.listener.start()
 
+        existing = getattr(self, "mouse_listener", None)
+        if existing is not None and existing.is_alive():
+            return
+        self._mouse_x2_down = False
+        self.mouse_listener = mouse.Listener(
+            win32_event_filter=self._mouse_event_filter)
+        self.mouse_listener.daemon = True
+        self.mouse_listener.start()
+
+    def _mouse_event_filter(self, message, data):
+        # Consume only X2, so starting Flow cannot also navigate/zoom the page
+        # away from its message box. All other mouse input passes unchanged.
+        if message in (0x020B, 0x020C) and data.mouseData >> 16 == 2:
+            pressed = message == 0x020B
+            if pressed and not self._mouse_x2_down:
+                self.events.put(("mouse_toggle", None))
+            self._mouse_x2_down = pressed
+            self.mouse_listener.suppress_event()
+        return True
+
     def _own_window(self, hwnd):
         """True if hwnd belongs to Flow itself (main window or the pill)."""
         if not hwnd:
@@ -1908,6 +1957,357 @@ class Dictation:
         if self._own_window(hwnd):
             return          # keep the previous target rather than targeting us
         self.target_hwnd = hwnd
+        self.text_target = text_target.capture(hwnd)
+        log.info("captured text target: window=%r field=%r verified_field=%s",
+                 wintext.window_title(hwnd),
+                 self.text_target.name if self.text_target else None,
+                 self.text_target is not None)
+
+    def _tts_piece_seconds(self, item):
+        """Estimated spoken length of one pending piece, in seconds.
+
+        The pending list holds generated audio, not playback, and carries no
+        timestamps - so the only honest cue for how long a piece will keep
+        the speakers busy is the audio itself. Edge mp3 (the shipped chain)
+        is 48 kbit/s, about 6000 bytes per second; WAV files carry their
+        exact byte rate in the header.
+        """
+        b64 = item.get("audioBase64") or ""
+        nbytes = (len(b64) * 3) // 4
+        if not nbytes:
+            return 0.0
+        mime = str(item.get("mime") or "").lower()
+        if "wav" in mime:
+            try:
+                import base64
+                import struct
+                head = base64.b64decode(b64[:88])
+                if len(head) >= 32 and head[12:16] == b"fmt ":
+                    byte_rate = struct.unpack("<I", head[28:32])[0]
+                    if byte_rate > 0:
+                        return nbytes / float(byte_rate)
+            except Exception:
+                pass
+            return nbytes / 44100.0
+        return nbytes / 6000.0
+
+    def _arm_reply_gate(self, items, baseline=False):
+        """Hold the mic shut while the estimated playback is still running."""
+        now = time.perf_counter()
+        for it in items:
+            secs = self._tts_piece_seconds(it)
+            if baseline and secs < 10.0:
+                # The server gives us generated audio, not playback state.
+                # Short replies are the deliberate tradeoff here: hold the
+                # mic for a conservative ten seconds before reopening it.
+                secs = 10.0
+            if secs > 0:
+                self._conv_gate_until = max(
+                    getattr(self, "_conv_gate_until", 0.0),
+                    now + secs + 0.8)
+                log.info("reply gate armed for %.1fs", secs + 0.8)
+
+    def _tts_started_during_turn(self):
+        """Poll the voice server; remember when the last spoken piece appeared.
+
+        Returns True on this call if new pieces arrived. Fresh pieces arm the
+        reply gate for their estimated spoken length: the pending list shows
+        generated audio, not speaker playback, so a fixed short window cannot
+        cover a long reply and the mic would hear the assistant's own voice.
+        """
+        try:
+            with urllib.request.urlopen(
+                    "http://127.0.0.1:3080/dsh-tts/pending", timeout=2) as resp:
+                items = [it for it in
+                         json.loads(resp.read().decode("utf-8")).get("items", [])
+                         if isinstance(it, dict) and it.get("id")]
+        except Exception:
+            return False
+        ids = {it.get("id") for it in items}
+        if self._conv_tts_ids is None:
+            self._conv_tts_ids = ids
+            # Whatever is already pending may still be playing through the
+            # speakers; arm the gate for the newest piece's full length.
+            speech = [it for it in items if it.get("audioBase64")]
+            if speech:
+                self._arm_reply_gate([speech[-1]], baseline=True)
+            self._conv_last_piece_at = time.perf_counter()
+            return False
+        fresh = [it for it in items if it.get("id") not in self._conv_tts_ids]
+        if fresh:
+            self._conv_tts_ids |= {it.get("id") for it in fresh}
+            self._conv_last_piece_at = time.perf_counter()
+            self._arm_reply_gate(fresh)
+            return True
+        return False
+
+    def _conv_vad(self):
+        """Lazily built Silero VAD iterator for this turn (None if unavailable).
+
+        A trained voice detector replaces the loudness thresholds: the webcam's
+        noise floor sits too close to quiet speech for RMS rules to separate
+        them reliably. False marks the failed attempt so the load is tried
+        only once per turn.
+        """
+        if self._conv_vad_iter is None:
+            try:
+                from silero_vad import load_silero_vad, VADIterator
+                model = load_silero_vad(onnx=True)
+                self._conv_vad_iter = VADIterator(
+                    model, threshold=0.5, sampling_rate=RATE,
+                    min_silence_duration_ms=2000, speech_pad_ms=30)
+                log.info("silero VAD ready for this turn")
+            except Exception as exc:
+                log.warning("silero VAD unavailable (%s); RMS fallback in use", exc)
+                self._conv_vad_iter = False
+        return self._conv_vad_iter or None
+
+    def _stop_conversation_watch(self):
+        job = getattr(self, "_conv_watch_job", None)
+        self._conv_watch_job = None
+        if job is not None:
+            self.root.after_cancel(job)
+
+    def _schedule_conversation_watch(self):
+        self._stop_conversation_watch()
+        if self.mode == TOGGLE:
+            self._conv_watch_job = self.root.after(
+                200, self._watch_conversation_silence)
+
+    def _watch_conversation_silence(self):
+        """Crash-proof scheduler for the per-tick conversation watcher.
+
+        Tk silently swallows exceptions raised inside root.after callbacks
+        under pythonw, which kills the watch chain with no log line. One bad
+        tick logs its traceback and the chain keeps running.
+        """
+        self._conv_watch_job = None
+        # The watcher runs for every hands-free turn, loop or not; the loop
+        # setting only decides whether a NEW round starts after delivery.
+        if self.mode != TOGGLE:
+            return
+        try:
+            self._conv_watch_tick()
+        except Exception:
+            log.exception("conversation watcher tick failed")
+        self._schedule_conversation_watch()
+
+    def _conv_watch_tick(self):
+        """One watcher step: gate the assistant's voice, watch for the user's.
+
+        Silero VAD (when available) consumes every new 512-sample block and
+        reports speech start/end itself; the end event already embodies the
+        three-second silence window. The RMS heuristic below remains only as a
+        fallback for machines where the model cannot load.
+        """
+        # One-turn mode starts only on an explicit press. Old reply history
+        # must never discard the first words or end a user turn early.
+        gated = False
+        if self.conversation_loop.get():
+            self._conv_tick = getattr(self, "_conv_tick", 0) + 1
+            if self._conv_tick % 2 == 0:
+                self._tts_started_during_turn()
+            tts_quiet_for = (
+                time.perf_counter() - self._conv_last_piece_at
+                if getattr(self, "_conv_last_piece_at", 0.0) else float("inf"))
+            gated = (time.perf_counter() < getattr(self, "_conv_gate_until", 0.0)
+                     or tts_quiet_for < 2.5)
+        if gated and not getattr(self, "_conv_gated", False):
+            self._set_state("Assistant is speaking...", "#666")
+        elif not gated and getattr(self, "_conv_gated", False):
+            self._set_state("Listening - speak now", "#b00")
+        self._conv_gated = gated
+        vad = self._conv_vad()
+        if vad is not None:
+            with self.lock:
+                end_abs = self.total
+            new = self._grab(max(0, self._conv_vad_pos))
+            self._conv_vad_pos = end_abs
+            if len(self._conv_vad_buf):
+                block = np.concatenate([self._conv_vad_buf, new])
+            else:
+                block = new
+            usable = len(block) - (len(block) % 512)
+            self._conv_vad_buf = block[usable:] if usable < len(block) else np.zeros(0, dtype="float32")
+            saw_end = False
+            saw_start = False
+            for i in range(0, usable, 512):
+                out = vad(block[i:i + 512])
+                if out:
+                    if 'end' in out:
+                        saw_end = True
+                    else:
+                        saw_start = True
+            if saw_start:
+                if gated:
+                    # The assistant's own voice through the speakers. If the
+                    # user already spoke this turn, deliver their words now
+                    # instead of discarding them with the reply audio; then
+                    # the reply-wait takes over until playback ends.
+                    if self._conv_speech_seen:
+                        log.info("assistant started talking - delivering the "
+                                 "user's words first")
+                        self._finish()
+                        return
+                    # The mic stays open, but the clip start moves past it so
+                    # the transcript never contains the reply.
+                    with self.lock:
+                        self.mark = self.total
+                    self._conv_speech_seen = False
+                    self._conv_silence_since = None
+                    log.info("ignoring assistant voice heard through the mic")
+                else:
+                    if not self._conv_speech_seen:
+                        log.info("conversation speech detected by VAD")
+                    self._conv_speech_seen = True
+                    self._conv_silence_since = None
+            if saw_end and self._conv_speech_seen and not gated:
+                log.info("automatic stop: 2.0s speech silence (VAD)")
+                self._finish()
+            # Do not also run the loudness fallback when the trained detector
+            # is available: room noise otherwise starts/ends false turns.
+            return
+        if gated:
+            return
+        with self.lock:
+            recent_end = self.total
+        recent = self._grab(max(0, recent_end - int(RATE * 0.4)))
+        level = float(np.sqrt((recent ** 2).mean())) if len(recent) else 0.0
+        base_threshold = max(0.005, float(getattr(self, "ambient", 0.0)) * 1.25)
+        threshold = max(base_threshold, getattr(self, "_conv_speech_level", 0.0) * 1.02)
+        now = time.perf_counter()
+        if level >= threshold:
+            if not self._conv_speech_seen:
+                self._conv_speech_level = level
+                threshold = max(base_threshold, level * 0.75)
+                log.info("conversation speech detected: rms=%.5f threshold=%.5f", level, threshold)
+            self._conv_speech_seen = True
+            self._conv_silence_since = None
+        elif self._conv_speech_seen:
+            if self._conv_silence_since is None:
+                self._conv_silence_since = now
+                log.info("conversation silence started: rms=%.5f threshold=%.5f", level, threshold)
+            elif now - self._conv_silence_since >= 2.0:
+                log.info("conversation silence reached 2.0s; finishing")
+                self._finish()
+                return
+
+    def _wait_for_reply_then_listen(self):
+        """Conversation mode: hold the mic shut until the DSH reply finishes.
+
+        Watches the local dsh-tts pending list: new spoken pieces appearing
+        means the reply is still talking. The first poll's ids are treated as
+        an old backlog and ignored. When nothing new has appeared for a few
+        seconds the reply is done and the microphone may open safely - the
+        mic otherwise hears the speakers and echoes the assistant back.
+        """
+        if not self.conversation_loop.get():
+            self._conv_wait = None
+            return
+        if self.mode != IDLE:
+            self._conv_wait = None      # the user took over - stop waiting
+            return
+        if self.busy:
+            self.root.after(300, self._wait_for_reply_then_listen)
+            return
+        if self._conv_wait is None:
+            self._conv_wait = {
+                "seen": set(), "baseline": False, "last_new": 0.0,
+                "started": time.perf_counter(), "errors": 0}
+            self._set_state("Waiting for the reply to finish...", "#666")
+        state = self._conv_wait
+        try:
+            with urllib.request.urlopen(
+                    "http://127.0.0.1:3080/dsh-tts/pending", timeout=3) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            items = [it for it in payload.get("items", [])
+                     if isinstance(it, dict) and it.get("id")]
+            ids = {it.get("id") for it in items}
+            state["errors"] = 0
+            if not state["baseline"]:
+                state["seen"] |= ids    # old backlog, not this reply
+                state["baseline"] = True
+                # The backlog may still be playing: hold for the newest
+                # piece's estimated length before opening the mic.
+                speech = [it for it in items if it.get("audioBase64")]
+                if speech:
+                    self._arm_reply_gate([speech[-1]], baseline=True)
+            else:
+                fresh = [it for it in items
+                         if it.get("id") not in state["seen"]]
+                if fresh:
+                    state["seen"] |= {it.get("id") for it in fresh}
+                    state["last_new"] = time.perf_counter()
+                    self._arm_reply_gate(fresh)
+        except Exception:
+            # Voice server briefly unreachable (host restarting): keep
+            # waiting under the overall cap below instead of opening the
+            # mic into a reply that may still be spoken.
+            pass
+        now = time.perf_counter()
+        spoke = state["last_new"] > 0.0
+        quiet_for = now - (state["last_new"] or state["started"])
+        gate_open = now >= getattr(self, "_conv_gate_until", 0.0)
+        if ((spoke and quiet_for >= 1.5 and gate_open)
+                or (not spoke and now - state["started"] >= 15.0)
+                or now - state["started"] >= 180.0):
+            self._conv_wait = None
+            self._start_conversation_round()
+            return
+        self.root.after(500, self._wait_for_reply_then_listen)
+
+    def _start_conversation_round(self):
+        """Start the next hands-free turn after a successful dictation."""
+        if not self.conversation_loop.get() or self.model is None:
+            return
+        self._sound_start()
+        if not self._ensure_microphone():
+            return
+        with self.lock:
+            self.mark = self.total
+        self.mode = TOGGLE
+        self._set_state("Conversation listening - tap Ctrl+Win to stop", "#b00")
+        self._conv_silence_since = None
+        self._conv_speech_seen = False
+        self._conv_speech_level = 0.0
+        self._conv_vad_iter = None
+        with self.lock:
+            self._conv_vad_pos = self.total
+        self._conv_vad_buf = np.zeros(0, dtype="float32")
+        if self.show_overlay.get():
+            self.overlay.show_listening()
+        self._schedule_conversation_watch()
+
+    def _on_mouse_toggle(self):
+        """One side-button press: start (or stop) a hands-free turn."""
+        if self.mode == TOGGLE:
+            self._finish()
+            return
+        if self.busy:
+            return
+        if self.model is None:
+            self._set_state("Flow is still starting. Try again in a moment.", ui.WARN)
+            return
+        self._sound_start()
+        if not self._ensure_microphone():
+            return
+        self._capture_target()
+        with self.lock:
+            self.mark = self.total
+        self.mode = TOGGLE
+        self._conv_silence_since = None
+        self._conv_speech_seen = False
+        self._conv_speech_level = 0.0
+        self._conv_vad_iter = None
+        with self.lock:
+            self._conv_vad_pos = self.total
+        self._conv_vad_buf = np.zeros(0, dtype="float32")
+        log.info("conversation turn started by mouse button: loop=%s",
+                 self.conversation_loop.get())
+        self._set_state("Listening - tap the side button to stop", "#b00")
+        if self.show_overlay.get():
+            self.overlay.show_listening()
+        self._schedule_conversation_watch()
 
     def _on_combo_down(self):
         if self.mode == TOGGLE:
@@ -1964,16 +2364,26 @@ class Dictation:
             with self.lock:
                 self.mark = self.total
             self.mode = TOGGLE
+            log.info("conversation first turn started: loop=%s", self.conversation_loop.get())
             self._set_state(
                 "Hands-free listening is on - tap Ctrl+Windows to stop", "#b00")
             if self.show_overlay.get():
                 self.overlay.show_listening()
+            self._conv_silence_since = None
+            self._conv_speech_seen = False
+            self._conv_speech_level = 0.0
+            self._conv_vad_iter = None
+            with self.lock:
+                self._conv_vad_pos = self.total
+            self._conv_vad_buf = np.zeros(0, dtype="float32")
+            self._schedule_conversation_watch()
         else:
             self.last_tap = now
             self.overlay.return_to_idle()
             self._schedule_idle_stream_close()
 
     def _finish(self):
+        self._stop_conversation_watch()
         mark, self.mark = self.mark, None
         self.mode = IDLE
         if mark is None:
@@ -1999,7 +2409,11 @@ class Dictation:
 
         rms = float(np.sqrt((audio ** 2).mean()))
         gate = max(MIN_SPEECH_RMS, self.ambient * SPEECH_OVER_AMBIENT)
-        if rms < gate:
+        # Whisper already uses speech detection (vad_filter=True). A whole-
+        # clip volume gate rejects quiet speech and speech surrounded by pauses
+        # before that detector can hear it. Keep the gate for CrisperWhisper,
+        # which does not use that speech detector.
+        if rms < gate and getattr(self, "loaded_engine", "crisper") != "whisper":
             self._reset_main_recording()
             self._set_state(
                 "Microphone connected, but your voice was too quiet. "
@@ -2017,6 +2431,8 @@ class Dictation:
                          args=(audio, self.text_mode.get()), daemon=True).start()
 
     def _transcribe(self, audio, mode):
+        log.info("transcribe worker started: %.1fs clip, engine=%s",
+                 len(audio) / RATE, getattr(self, "loaded_engine", "?"))
         # Everything is inside the try, imports included. This runs on a worker
         # thread while self.busy is set, and busy is only cleared by an event
         # from here - so a path that returns without queuing one (a failed
@@ -2035,7 +2451,10 @@ class Dictation:
                 # English and te reo Māori mix freely in one sentence. It has
                 # no verbatim mode; its natural output is clean text.
                 import whisper_engine
+                log.info("whisper transcribe start: %.1fs of audio", len(audio) / RATE)
+                _t0 = time.perf_counter()
                 text = whisper_engine.transcribe(self.model, str(tmp), None)
+                log.info("whisper transcribe done in %.1fs", time.perf_counter() - _t0)
                 self.events.put(("text", text))
             else:
                 # mode is a native model capability, not post-processing.
@@ -2090,20 +2509,57 @@ class Dictation:
             self.overlay.show_done("Copied")
             return
 
-        ok, method = wintext.insert_text(flat, target_hwnd=self.target_hwnd)
         words = len(flat.split())
-        if ok:
-            self.last_insert_hwnd = self.target_hwnd
-            self.last_insert_time = time.perf_counter()
-            where = wintext.window_title(self.target_hwnd) or "the focused app"
-            self._set_state(f"Typed {words} words into {where[:28]}", "#080")
-            self.overlay.show_done(f"Typed {words} words")
-        elif method == "lost-focus":
-            self._set_state("Couldn't return to your window - copied instead", "#c80")
-            self.overlay.show_done("Copied to clipboard", good=False)
+        target = self.text_target
+        if target is None and not self.conversation_submit.get():
+            # Keep ordinary dictation usable in editors without accessibility
+            # support. It never auto-submits, and its log makes no claim that
+            # the app actually consumed these keystrokes.
+            ok, method = wintext.insert_text(flat, target_hwnd=self.target_hwnd)
+            log.info("plain dictation input requested: accepted=%s method=%s",
+                     ok, method)
+            if ok:
+                self.last_insert_hwnd = self.target_hwnd
+                self.last_insert_time = time.perf_counter()
+            self._set_state("Paste requested" if ok else "Text copied instead",
+                            "#080" if ok else "#c80")
+            self.overlay.show_done("Paste requested" if ok else "Copied", good=ok)
+            return
+        if target is None:
+            # A window handle does not identify a browser input. Do not send
+            # blind Ctrl+V/Enter to a page, search box, or unrelated window.
+            wintext.set_clipboard_text(flat)
+            log.warning("delivery not attempted: no verified text field; words=%d",
+                        words)
+            self._set_state("Couldn't find the message box - text copied", "#c80")
+            self.overlay.show_done("Copied - click the message box", good=False)
+            return
+
+        ok, method = target.insert(flat)
+        log.info("text insertion: verified=%s result=%s words=%d field=%r",
+                 ok, method, words, target.name)
+        if not ok:
+            self._set_state("Couldn't verify typing - text is copied", "#c80")
+            self.overlay.show_done("Not sent - text copied", good=False)
+            return
+
+        self.last_insert_hwnd = self.target_hwnd
+        self.last_insert_time = time.perf_counter()
+        if self.conversation_submit.get():
+            sent, result = target.submit()
+            log.info("chat submission: input_cleared=%s result=%s words=%d",
+                     sent, result, words)
+            if not sent:
+                self._set_state("Words pasted but not sent - press Send", "#c80")
+                self.overlay.show_done("Pasted - press Send", good=False)
+                return
+            self._set_state(f"Sent {words} words to the chat", "#080")
+            self.overlay.show_done(f"Sent {words} words")
         else:
-            self._set_state("Couldn't type it - copied to clipboard instead", "#c80")
-            self.overlay.show_done("Copied instead", good=False)
+            self._set_state(f"Pasted {words} words", "#080")
+            self.overlay.show_done(f"Pasted {words} words")
+        if self.conversation_loop.get():
+            self.root.after(100, self._wait_for_reply_then_listen)
 
     def _handle_event(self, kind, payload):
         if kind == "state":
@@ -2116,6 +2572,8 @@ class Dictation:
                 self._set_state("No microphone connected", "#b00")
         elif kind == "combo_down":
             self._on_combo_down()
+        elif kind == "mouse_toggle":
+            self._on_mouse_toggle()
         elif kind == "combo_up":
             self._on_combo_up(payload)
         elif kind == "text":
@@ -2248,11 +2706,15 @@ class Dictation:
             log.exception("could not restart the key listener")
 
     def _on_close(self):
+        self._stop_conversation_watch()
         self._stop_stream(clear_buffers=True)
-        try:
-            self.listener.stop()
-        except Exception:
-            pass
+        for listener in (getattr(self, "listener", None),
+                         getattr(self, "mouse_listener", None)):
+            if listener is not None:
+                try:
+                    listener.stop()
+                except Exception:
+                    pass
         self.root.destroy()
 
 
