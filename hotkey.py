@@ -2566,6 +2566,25 @@ class Dictation:
             except Exception:
                 pass
             if is_dsh_chat and self.target_hwnd:
+                # Neo exposes no accessible composer, so Ctrl+V lands wherever
+                # the page keeps focus - often the transcript, where the paste
+                # is silently dropped. Click the bottom-centre of the captured
+                # window: the composer in the DSH layout, no matter whether the
+                # turn started from the mouse button or the pill.
+                try:
+                    rect = wintext.window_rect(self.target_hwnd)
+                    if rect:
+                        left, top, right, bottom = rect
+                        x = (left + right) // 2
+                        y = max(top + 60, bottom - 90)
+                        if wintext.force_foreground(self.target_hwnd):
+                            mouse.Controller().position = (x, y)
+                            time.sleep(0.08)
+                            mouse.Controller().click(mouse.Button.left)
+                            time.sleep(0.12)
+                except Exception:
+                    log.warning('could not click the DSH composer point',
+                                exc_info=True)
                 ok, method = wintext.insert_text(flat, target_hwnd=self.target_hwnd)
                 log.info('dsh clipboard fallback paste: ok=%s method=%s words=%d',
                          ok, method, words)

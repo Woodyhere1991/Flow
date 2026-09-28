@@ -230,6 +230,25 @@ def window_title(hwnd):
     return buf.value
 
 
+class RECT(ctypes.Structure):
+    _fields_ = [("left", wintypes.LONG), ("top", wintypes.LONG),
+                ("right", wintypes.LONG), ("bottom", wintypes.LONG)]
+
+
+user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(RECT)]
+user32.GetWindowRect.restype = wintypes.BOOL
+
+
+def window_rect(hwnd):
+    """(left, top, right, bottom) of a window, or None."""
+    if not hwnd or not user32.IsWindow(hwnd):
+        return None
+    rc = RECT()
+    if not user32.GetWindowRect(hwnd, ctypes.byref(rc)):
+        return None
+    return (rc.left, rc.top, rc.right, rc.bottom)
+
+
 def force_foreground(hwnd):
     """Make hwnd the foreground window, working around the foreground lock.
 
