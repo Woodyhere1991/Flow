@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "C:\Users\wirih\repos\flow\voice_bridge.py", line 35, in do_POST
+    with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\wirih\AppData\Local\Programs\Python\Python312\Lib\tempfile.py", line 564, in NamedTemporaryFile
+    prefix, suffix, dir, output_type = _sanitize_params(prefix, suffix, dir)
+                                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\wirih\AppData\Local\Programs\Python\Python312\Lib\tempfile.py", line 126, in _sanitize_params
+    dir = gettempdir()
+          ^^^^^^^^^^^^
+  File "C:\Users\wirih\AppData\Local\Programs\Python\Python312\Lib\tempfile.py", line 315, in gettempdir
+    return _os.fsdecode(_gettempdir())
+                        ^^^^^^^^^^^^^
+  File "C:\Users\wirih\AppData\Local\Programs\Python\Python312\Lib\tempfile.py", line 308, in _gettempdir
+    tempdir = _get_default_tempdir()
+              ^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\wirih\AppData\Local\Programs\Python\Python312\Lib\tempfile.py", line 223, in _get_default_tempdir
+    raise FileNotFoundError(_errno.ENOENT,
+FileNotFoundError: [Errno 2] No usable temporary directory found in ['C:\\Users\\wirih\\AppData\\Local\\Temp', 'C:\\Users\\wirih\\AppData\\Local\\Temp', 'C:\\Users\\wirih\\AppData\\Local\\Temp', 'C:\\WINDOWS\\Temp', 'c:\\temp', 'c:\\tmp', '\\temp', '\\tmp', 'C:\\WINDOWS\\system32']
+
+07:52:53 whisper model loaded
+07:52:55 transcribed 19097 bytes in 3.0s -> 'Bridge test 123'
