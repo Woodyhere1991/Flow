@@ -43,11 +43,13 @@ import sounds
 import ui
 import wintext
 import text_target
+import dshvoice
 from overlay import Overlay
 
-APP_DATA_DIR = Path(os.environ.get(
-    "LOCALAPPDATA", str(Path.home() / "AppData" / "Local")
-)) / "Flow"
+# McAfee blocks this venv python from writing %LOCALAPPDATA%\Flow (since
+# 28 Sep), so Flow keeps its data beside the app instead. Migration copied
+# settings/hardware across on 28 Sep.
+APP_DATA_DIR = Path(__file__).resolve().parent / "data"
 SETTINGS_PATH = APP_DATA_DIR / "settings.json"
 HARDWARE_PATH = APP_DATA_DIR / "hardware.json"
 LEGACY_SETTINGS_PATH = Path(__file__).with_name("settings.json")
@@ -1398,10 +1400,26 @@ class Dictation:
         if self.show_overlay.get():
             self.overlay.show_listening()
 
+    def _stop_dsh_voice(self, source):
+        """Silence a playing DSH reply; the press does nothing else.
+
+        Returns True when the reply voice was playing and a stop was sent,
+        so the caller must not also start a dictation turn.
+        """
+        if not dshvoice.speaking():
+            return False
+        stopped = dshvoice.stop()
+        log.info("dsh reply voice stopped by %s (ack=%s)", source, stopped)
+        self._set_state("Stopped the reply voice", ui.GOOD)
+        self.overlay.show_done("Voice stopped")
+        return True
+
     def _toggle_overlay_recording(self):
         """Start or stop dictation from the non-activating floating pill."""
         if self.mode in (PTT, TOGGLE):
             self._finish()
+            return
+        if self._stop_dsh_voice("pill"):
             return
         if self.busy:
             self._set_state("Flow is turning your speech into text...", ui.WARN)
@@ -2283,6 +2301,8 @@ class Dictation:
         if self.mode == TOGGLE:
             self._finish()
             return
+        if self._stop_dsh_voice("mouse button"):
+            return
         if self.busy:
             return
         if self.model is None:
@@ -2511,6 +2531,13 @@ class Dictation:
 
         words = len(flat.split())
         target = self.text_target
+        if target is None and self.target_hwnd and self.conversation_submit.get():
+            # The browser may replace its composer while a page/session loads.
+            # Capture it again at delivery time before falling back to clipboard.
+            target = text_target.capture(self.target_hwnd)
+            self.text_target = target
+            log.info("delivery-time text target retry: verified_field=%s",
+                     target is not None)
         if target is None and not self.conversation_submit.get():
             # Keep ordinary dictation usable in editors without accessibility
             # support. It never auto-submits, and its log makes no claim that

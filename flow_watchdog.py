@@ -32,8 +32,9 @@ HOTKEY = HERE / "hotkey.py"
 
 # Same folder hotkey.py already logs to, so both logs sit together.
 import os
-APP_DATA_DIR = pathlib.Path(os.environ.get(
-    "LOCALAPPDATA", str(pathlib.Path.home() / "AppData" / "Local"))) / "Flow"
+# Same reason as hotkey.py: McAfee denies this venv python writes under
+# %LOCALAPPDATA%\Flow, so the watchdog log lives in the repo data folder.
+APP_DATA_DIR = HERE / "data"
 LOG_PATH = APP_DATA_DIR / "flow_watchdog.log"
 
 
