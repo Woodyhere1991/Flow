@@ -2557,8 +2557,9 @@ class Dictation:
             # blind Ctrl+V/Enter to a page, search box, or unrelated window.
             # EXCEPTION (28 Sep): Neo's renderer exposes no UIA tree at all,
             # so the DSH chat composer can never verify. When the captured
-            # window IS the harness chat, paste into it - but never
-            # auto-submit blind; Send stays a human press.
+            # window IS the harness chat, paste into it, then send Enter to
+            # submit - same one-press outcome as the verified path. Enter is
+            # still only sent when conversation submit is switched on.
             is_dsh_chat = False
             try:
                 is_dsh_chat = 'DeepSeek Harness' in wintext.window_title(self.target_hwnd)
@@ -2571,8 +2572,21 @@ class Dictation:
                 if ok:
                     self.last_insert_hwnd = self.target_hwnd
                     self.last_insert_time = time.perf_counter()
-                    self._set_state('Pasted - press Send', '#080')
-                    self.overlay.show_done('Pasted - press Send', good=True)
+                    if self.conversation_submit.get():
+                        # Give the page time to consume the paste, then
+                        # submit with one Enter - the DSH composer sends
+                        # on Enter.
+                        time.sleep(0.25)
+                        sent = wintext.send_enter()
+                        log.info('dsh fallback submit: enter=%s words=%d',
+                                 sent, words)
+                        self._set_state('Sent' if sent else 'Pasted - press Send',
+                                        '#080' if sent else '#c80')
+                        self.overlay.show_done('Sent' if sent else 'Pasted - press Send',
+                                               good=sent)
+                    else:
+                        self._set_state('Pasted - press Send', '#080')
+                        self.overlay.show_done('Pasted - press Send', good=True)
                     return
             wintext.set_clipboard_text(flat)
             log.warning("delivery not attempted: no verified text field; words=%d",

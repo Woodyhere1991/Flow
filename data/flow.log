@@ -1,0 +1,153 @@
+2026-09-28 15:54:48,994 INFO    MainThread   starting Flow (python 3.12.10, C:\Users\wirih\repos\bin-sparkle\Flow\venv\Scripts\pythonw.exe)
+2026-09-28 16:03:51,435 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:03:51,521 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:03:51,604 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:03:51,687 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:03:51,763 WARNING MainThread   No verifiable text field found for hwnd=13701300
+2026-09-28 16:03:51,763 INFO    MainThread   captured text target: window='Next steps after calling DIA about funding — DeepSeek Harness - Neo' field=None verified_field=False
+2026-09-28 16:04:37,495 INFO    Thread-4 (_transcribe) transcribe worker started: 45.4s clip, engine=whisper
+2026-09-28 16:04:37,551 INFO    Thread-4 (_transcribe) whisper transcribe start: 45.4s of audio
+2026-09-28 16:04:39,606 INFO    Thread-4 (_transcribe) whisper transcribe done in 2.1s
+2026-09-28 16:04:39,651 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:39,732 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:39,815 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:39,898 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:39,974 WARNING MainThread   No verifiable text field found for hwnd=13701300
+2026-09-28 16:04:39,974 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 16:04:39,975 WARNING MainThread   delivery not attempted: no verified text field; words=35
+2026-09-28 16:04:46,697 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:46,780 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:46,862 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:46,946 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:47,022 WARNING MainThread   No verifiable text field found for hwnd=13701300
+2026-09-28 16:04:47,022 INFO    MainThread   captured text target: window='Next steps after calling DIA about funding — DeepSeek Harness - Neo' field=None verified_field=False
+2026-09-28 16:04:54,391 INFO    Thread-5 (_transcribe) transcribe worker started: 7.1s clip, engine=whisper
+2026-09-28 16:04:54,393 INFO    Thread-5 (_transcribe) whisper transcribe start: 7.1s of audio
+2026-09-28 16:04:55,526 INFO    Thread-5 (_transcribe) whisper transcribe done in 1.1s
+2026-09-28 16:04:55,592 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:55,674 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:55,758 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:55,840 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:04:55,916 WARNING MainThread   No verifiable text field found for hwnd=13701300
+2026-09-28 16:04:55,916 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 16:04:55,917 WARNING MainThread   delivery not attempted: no verified text field; words=1
+2026-09-28 16:05:06,341 WARNING MainThread   No verifiable text field found for hwnd=68034
+2026-09-28 16:05:06,341 INFO    MainThread   captured text target: window='Magnifier' field=None verified_field=False
+2026-09-28 16:05:09,163 INFO    Thread-6 (_transcribe) transcribe worker started: 2.5s clip, engine=whisper
+2026-09-28 16:05:09,165 INFO    Thread-6 (_transcribe) whisper transcribe start: 2.5s of audio
+2026-09-28 16:05:10,313 INFO    Thread-6 (_transcribe) whisper transcribe done in 1.1s
+2026-09-28 16:05:10,693 WARNING MainThread   No verifiable text field found for hwnd=68034
+2026-09-28 16:05:10,693 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 16:05:10,695 WARNING MainThread   delivery not attempted: no verified text field; words=1
+2026-09-28 16:05:30,818 WARNING MainThread   No verifiable text field found for hwnd=460162
+2026-09-28 16:05:30,818 INFO    MainThread   captured text target: window='ZCode' field=None verified_field=False
+2026-09-28 16:05:36,954 INFO    Thread-7 (_transcribe) transcribe worker started: 5.8s clip, engine=whisper
+2026-09-28 16:05:36,957 INFO    Thread-7 (_transcribe) whisper transcribe start: 5.8s of audio
+2026-09-28 16:05:38,178 INFO    Thread-7 (_transcribe) whisper transcribe done in 1.2s
+2026-09-28 16:05:38,555 WARNING MainThread   No verifiable text field found for hwnd=460162
+2026-09-28 16:05:38,555 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 16:05:38,555 WARNING MainThread   delivery not attempted: no verified text field; words=11
+2026-09-28 16:37:07,395 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:37:07,488 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:37:07,571 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:37:07,655 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:37:07,731 WARNING MainThread   No verifiable text field found for hwnd=13701300
+2026-09-28 16:37:07,731 INFO    MainThread   captured text target: window='Next steps after calling DIA about funding — DeepSeek Harness - Neo' field=None verified_field=False
+2026-09-28 16:37:16,415 INFO    Thread-8 (_transcribe) transcribe worker started: 8.3s clip, engine=whisper
+2026-09-28 16:37:16,429 INFO    Thread-8 (_transcribe) whisper transcribe start: 8.3s of audio
+2026-09-28 16:37:17,761 INFO    Thread-8 (_transcribe) whisper transcribe done in 1.3s
+2026-09-28 16:37:17,815 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:37:17,897 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:37:17,979 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:37:18,062 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 16:37:18,138 WARNING MainThread   No verifiable text field found for hwnd=13701300
+2026-09-28 16:37:18,138 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 16:37:18,138 WARNING MainThread   delivery not attempted: no verified text field; words=8
+2026-09-28 16:37:30,524 INFO    MainThread   Flow closed
+2026-09-28 16:37:40,840 INFO    MainThread   starting Flow (python 3.12.10, C:\Users\wirih\repos\bin-sparkle\Flow\venv\Scripts\pythonw.exe)
+2026-09-28 16:38:09,523 WARNING MainThread   No verifiable text field found for hwnd=13701300
+2026-09-28 16:38:09,523 INFO    MainThread   captured text target: window='Magic Page - Neo' field=None verified_field=False
+2026-09-28 16:38:13,841 INFO    Thread-4 (_transcribe) transcribe worker started: 4.0s clip, engine=whisper
+2026-09-28 16:38:13,851 INFO    Thread-4 (_transcribe) whisper transcribe start: 4.0s of audio
+2026-09-28 16:38:15,575 INFO    Thread-4 (_transcribe) whisper transcribe done in 1.7s
+2026-09-28 16:38:15,912 WARNING MainThread   No verifiable text field found for hwnd=13701300
+2026-09-28 16:38:15,912 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 16:38:15,912 WARNING MainThread   delivery not attempted: no verified text field; words=4
+2026-09-28 16:38:48,841 WARNING MainThread   No verifiable text field found for hwnd=13701300
+2026-09-28 16:38:48,841 INFO    MainThread   captured text target: window='Magic Page - Neo' field=None verified_field=False
+2026-09-28 16:38:55,727 INFO    Thread-5 (_transcribe) transcribe worker started: 6.6s clip, engine=whisper
+2026-09-28 16:38:55,730 INFO    Thread-5 (_transcribe) whisper transcribe start: 6.6s of audio
+2026-09-28 16:38:56,884 INFO    Thread-5 (_transcribe) whisper transcribe done in 1.2s
+2026-09-28 16:38:57,244 WARNING MainThread   No verifiable text field found for hwnd=13701300
+2026-09-28 16:38:57,244 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 16:38:57,244 WARNING MainThread   delivery not attempted: no verified text field; words=4
+2026-09-28 16:40:23,834 INFO    Thread-6 (_transcribe) transcribe worker started: 3.7s clip, engine=whisper
+2026-09-28 16:40:23,836 INFO    Thread-6 (_transcribe) whisper transcribe start: 3.7s of audio
+2026-09-28 16:40:25,049 INFO    Thread-6 (_transcribe) whisper transcribe done in 1.2s
+2026-09-28 23:09:52,824 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:09:52,921 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:09:53,004 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:09:53,087 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:09:53,164 WARNING MainThread   No verifiable text field found for hwnd=2229732
+2026-09-28 23:09:53,164 INFO    MainThread   captured text target: window='Can JEV Find Files and Folders — DeepSeek Harness - Neo' field=None verified_field=False
+2026-09-28 23:09:56,536 INFO    Thread-7 (_transcribe) transcribe worker started: 3.0s clip, engine=whisper
+2026-09-28 23:09:56,549 INFO    Thread-7 (_transcribe) whisper transcribe start: 3.0s of audio
+2026-09-28 23:09:58,181 INFO    Thread-7 (_transcribe) whisper transcribe done in 1.6s
+2026-09-28 23:09:58,274 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:09:58,356 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:09:58,438 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:09:58,521 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:09:58,597 WARNING MainThread   No verifiable text field found for hwnd=2229732
+2026-09-28 23:09:58,597 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 23:09:58,598 WARNING MainThread   delivery not attempted: no verified text field; words=1
+2026-09-28 23:12:25,285 INFO    MainThread   starting Flow (python 3.12.10, C:\Users\wirih\repos\bin-sparkle\Flow\venv\Scripts\pythonw.exe)
+2026-09-28 23:45:30,603 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:30,693 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:30,775 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:30,857 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:30,933 WARNING MainThread   No verifiable text field found for hwnd=2229732
+2026-09-28 23:45:30,933 INFO    MainThread   captured text target: window='Using GEV with ICM Feasibility — DeepSeek Harness - Neo' field=None verified_field=False
+2026-09-28 23:45:36,205 INFO    Thread-4 (_transcribe) transcribe worker started: 5.1s clip, engine=whisper
+2026-09-28 23:45:36,269 INFO    Thread-4 (_transcribe) whisper transcribe start: 5.1s of audio
+2026-09-28 23:45:38,315 INFO    Thread-4 (_transcribe) whisper transcribe done in 2.0s
+2026-09-28 23:45:38,350 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:38,432 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:38,514 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:38,598 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:38,674 WARNING MainThread   No verifiable text field found for hwnd=2229732
+2026-09-28 23:45:38,674 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 23:45:38,736 INFO    MainThread   dsh clipboard fallback paste: ok=True method=paste words=6
+2026-09-28 23:45:51,844 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:51,927 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:52,008 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:52,092 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:52,168 WARNING MainThread   No verifiable text field found for hwnd=2229732
+2026-09-28 23:45:52,168 INFO    MainThread   captured text target: window='Using GEV with ICM Feasibility — DeepSeek Harness - Neo' field=None verified_field=False
+2026-09-28 23:45:53,929 INFO    Thread-5 (_transcribe) transcribe worker started: 1.6s clip, engine=whisper
+2026-09-28 23:45:53,934 INFO    Thread-5 (_transcribe) whisper transcribe start: 1.6s of audio
+2026-09-28 23:45:55,454 INFO    Thread-5 (_transcribe) whisper transcribe done in 1.5s
+2026-09-28 23:45:55,527 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:55,610 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:55,694 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:55,777 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:45:55,855 WARNING MainThread   No verifiable text field found for hwnd=2229732
+2026-09-28 23:45:55,855 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 23:45:55,924 INFO    MainThread   dsh clipboard fallback paste: ok=True method=paste words=1
+2026-09-28 23:46:10,781 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:46:10,864 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:46:10,946 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:46:11,029 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:46:11,106 WARNING MainThread   No verifiable text field found for hwnd=2229732
+2026-09-28 23:46:11,106 INFO    MainThread   captured text target: window='Using GEV with ICM Feasibility — DeepSeek Harness - Neo' field=None verified_field=False
+2026-09-28 23:46:13,828 INFO    Thread-6 (_transcribe) transcribe worker started: 2.6s clip, engine=whisper
+2026-09-28 23:46:13,832 INFO    Thread-6 (_transcribe) whisper transcribe start: 2.6s of audio
+2026-09-28 23:46:15,009 INFO    Thread-6 (_transcribe) whisper transcribe done in 1.2s
+2026-09-28 23:46:15,022 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:46:15,105 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:46:15,187 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:46:15,271 INFO    MainThread   named composer not unique (0 visible); trying focused field
+2026-09-28 23:46:15,346 WARNING MainThread   No verifiable text field found for hwnd=2229732
+2026-09-28 23:46:15,346 INFO    MainThread   delivery-time text target retry: verified_field=False
+2026-09-28 23:46:15,407 INFO    MainThread   dsh clipboard fallback paste: ok=True method=paste words=4
+2026-09-28 23:50:56,157 INFO    MainThread   starting Flow (python 3.12.10, C:\Users\wirih\repos\bin-sparkle\Flow\venv\Scripts\pythonw.exe)
+2026-09-28 23:53:32,677 INFO    MainThread   starting Flow (python 3.12.10, C:\Users\wirih\repos\flow\venv\Scripts\pythonw.exe)

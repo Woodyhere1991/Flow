@@ -133,6 +133,7 @@ def _capture_once(hwnd):
             api.CUIAutomation, interface=api.IUIAutomation)
         root = automation.ElementFromHandle(hwnd)
         is_chat = "DeepSeek Harness" in wintext.window_title(hwnd)
+        element = None
         if is_chat:
             condition = automation.CreateAndCondition(
                 automation.CreatePropertyCondition(
@@ -142,18 +143,22 @@ def _capture_once(hwnd):
             fields = root.FindAll(api.TreeScope_Descendants, condition)
             visible = [fields.GetElement(i) for i in range(fields.Length)
                        if not fields.GetElement(i).CurrentIsOffscreen]
-            if len(visible) != 1:
-                log.warning("Expected one visible DSH message box; found %d",
-                            len(visible))
-                return None
-            element = visible[0]
-            # Chromium can expose a field's name before it exposes its value
-            # pattern. Focus the composer, then ask for the focused provider.
-            element.SetFocus()
-            element = automation.GetFocusedElement()
-            if element.CurrentName != CHAT_INPUT_NAME:
-                return None
-        else:
+            if len(visible) == 1:
+                element = visible[0]
+                # Chromium can expose a field's name before it exposes its value
+                # pattern. Focus the composer, then ask for the focused provider.
+                element.SetFocus()
+                element = automation.GetFocusedElement()
+                if element.CurrentName != CHAT_INPUT_NAME:
+                    element = None
+            else:
+                # A fresh/renamed view can expose the composer under a
+                # different accessible name. Fall back to whatever editable
+                # field the user focused in this window - never the address
+                # bar, which lives in a different window subtree below.
+                log.info("named composer not unique (%d visible); trying "
+                         "focused field", len(visible))
+        if element is None:
             element = automation.GetFocusedElement()
             if not element or not element.CurrentIsKeyboardFocusable:
                 return None
@@ -162,6 +167,18 @@ def _capture_once(hwnd):
             while ancestor and not automation.CompareElements(ancestor, root):
                 ancestor = automation.ControlViewWalker.GetParentElement(ancestor)
             if not ancestor:
+                return None
+            if is_chat and element.CurrentControlType != api.UIA_EditControlTypeId:
+                # In DSH only an edit field is ever the composer; anything
+                # else focused (a button, the transcript) is not a target.
+                return None
+            if is_chat and not element.CurrentName.startswith(
+                    "Message or run a task"):
+                # A different DSH composer (e.g. the new-session box
+                # "Describe what you want to build") is the wrong
+                # destination. Abort; the words stay on the clipboard.
+                log.info("focused field is not the chat composer (%r); "
+                         "not delivering", element.CurrentName)
                 return None
         pattern = element.GetCurrentPattern(api.UIA_ValuePatternId).QueryInterface(
             api.IUIAutomationValuePattern)

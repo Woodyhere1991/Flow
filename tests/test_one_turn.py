@@ -153,7 +153,7 @@ class VadEnd(unittest.TestCase):
 
 
 class RmsFallback(unittest.TestCase):
-    """Loudness fallback runs only without VAD, and never before 3s."""
+    """Loudness fallback runs only without VAD, and never before 2s."""
 
     def test_no_rms_fallback_while_vad_active(self):
         d = make_dictation()
@@ -164,17 +164,17 @@ class RmsFallback(unittest.TestCase):
         self.assertEqual(d._conv_speech_level, 0.0)
         self.assertIsNone(d._conv_silence_since)
 
-    def test_rms_silence_not_before_3s(self):
+    def test_rms_silence_not_before_2s(self):
         d = make_dictation(_conv_speech_seen=True, _conv_vad_iter=False)
         feed(d, RATE // 2)
-        d._conv_silence_since = time.perf_counter() - 2.5
+        d._conv_silence_since = time.perf_counter() - 1.5
         d._conv_watch_tick()
         d._finish.assert_not_called()
 
-    def test_rms_silence_finishes_at_3s(self):
+    def test_rms_silence_finishes_at_2s(self):
         d = make_dictation(_conv_speech_seen=True, _conv_vad_iter=False)
         feed(d, RATE // 2)
-        d._conv_silence_since = time.perf_counter() - 3.05
+        d._conv_silence_since = time.perf_counter() - 2.05
         d._conv_watch_tick()
         d._finish.assert_called_once()
 
@@ -283,6 +283,67 @@ class TurnStart(unittest.TestCase):
         d._conv_vad_iter = FakeVAD([{"start": 1.0}])
         d._conv_watch_tick()
         self.assertEqual(d.mark, start)
+
+
+class StopVoiceGate(unittest.TestCase):
+    """A press while DSH is reading a reply silences it and does nothing else."""
+
+    def make_idle(self):
+        return make_dictation(mode=IDLE, mark=None, model=object(),
+                              busy=False, _busy=False,
+                              personalize_mark=None,
+                              show_overlay=FakeVar(False),
+                              _sound_start=mock.Mock(),
+                              _ensure_microphone=mock.Mock(return_value=True),
+                              _capture_target=mock.Mock(),
+                              overlay=mock.Mock())
+
+    def test_mouse_press_stops_voice_without_recording(self):
+        d = self.make_idle()
+        with mock.patch("dshvoice.speaking", return_value=True), \
+             mock.patch("dshvoice.stop", return_value=True) as stop:
+            d._on_mouse_toggle()
+        stop.assert_called_once()
+        self.assertEqual(d.mode, IDLE)          # no dictation turn started
+        self.assertIsNone(d.mark)
+        d._sound_start.assert_not_called()
+        d._ensure_microphone.assert_not_called()
+        d._capture_target.assert_not_called()
+        d.overlay.show_done.assert_called_once()
+
+    def test_pill_click_stops_voice_without_recording(self):
+        d = self.make_idle()
+        with mock.patch("dshvoice.speaking", return_value=True), \
+             mock.patch("dshvoice.stop", return_value=True) as stop:
+            d._toggle_overlay_recording()
+        stop.assert_called_once()
+        self.assertEqual(d.mode, IDLE)
+        self.assertIsNone(d.mark)
+        d._sound_start.assert_not_called()
+        d._ensure_microphone.assert_not_called()
+        d._capture_target.assert_not_called()
+        d.overlay.show_done.assert_called_once()
+
+    def test_press_still_records_when_voice_idle(self):
+        d = self.make_idle()
+        feed(d, RATE // 4)                       # mic warm-up audio exists
+        start = d.total
+        with mock.patch("dshvoice.speaking", return_value=False), \
+             mock.patch("dshvoice.stop") as stop:
+            d._on_mouse_toggle()
+        stop.assert_not_called()
+        self.assertEqual(d.mode, TOGGLE)         # normal turn
+        self.assertEqual(d.mark, start)
+
+    def test_press_during_recording_finishes_turn_not_voice(self):
+        d = self.make_idle()
+        d.mode = TOGGLE                          # already recording
+        with mock.patch("dshvoice.speaking", return_value=True), \
+             mock.patch("dshvoice.stop") as stop:
+            d._on_mouse_toggle()
+            d._toggle_overlay_recording()
+        stop.assert_not_called()                 # stop-recording wins
+        self.assertEqual(d._finish.call_count, 2)
 
 
 if __name__ == "__main__":

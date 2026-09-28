@@ -1,0 +1,12 @@
+{
+  "device": "cuda",
+  "device_name": "NVIDIA GeForce RTX 3050 Laptop GPU",
+  "gpu_memory_gb": 4.0,
+  "cuda_available": true,
+  "cpu_name": "12th Gen Intel(R) Core(TM) i5-12500H",
+  "memory_gb": 15.6,
+  "logical_processors": 16,
+  "recommended_model": "turbo",
+  "performance": "fast",
+  "warning": ""
+}
