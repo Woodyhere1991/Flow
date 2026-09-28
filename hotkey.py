@@ -2555,6 +2555,25 @@ class Dictation:
         if target is None:
             # A window handle does not identify a browser input. Do not send
             # blind Ctrl+V/Enter to a page, search box, or unrelated window.
+            # EXCEPTION (28 Sep): Neo's renderer exposes no UIA tree at all,
+            # so the DSH chat composer can never verify. When the captured
+            # window IS the harness chat, paste into it - but never
+            # auto-submit blind; Send stays a human press.
+            is_dsh_chat = False
+            try:
+                is_dsh_chat = 'DeepSeek Harness' in wintext.window_title(self.target_hwnd)
+            except Exception:
+                pass
+            if is_dsh_chat and self.target_hwnd:
+                ok, method = wintext.insert_text(flat, target_hwnd=self.target_hwnd)
+                log.info('dsh clipboard fallback paste: ok=%s method=%s words=%d',
+                         ok, method, words)
+                if ok:
+                    self.last_insert_hwnd = self.target_hwnd
+                    self.last_insert_time = time.perf_counter()
+                    self._set_state('Pasted - press Send', '#080')
+                    self.overlay.show_done('Pasted - press Send', good=True)
+                    return
             wintext.set_clipboard_text(flat)
             log.warning("delivery not attempted: no verified text field; words=%d",
                         words)
