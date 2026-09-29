@@ -2576,7 +2576,10 @@ class Dictation:
                     if rect:
                         left, top, right, bottom = rect
                         x = (left + right) // 2
-                        y = max(top + 60, bottom - 90)
+                        # Neo's composer has its text area well above the
+                        # lower button row. The old bottom-90 point clicked
+                        # the controls, so paste went nowhere.
+                        y = max(top + 60, bottom - 170)
                         if wintext.force_foreground(self.target_hwnd):
                             mouse.Controller().position = (x, y)
                             time.sleep(0.08)

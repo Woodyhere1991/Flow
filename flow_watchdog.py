@@ -15,16 +15,23 @@ child is gone - which is proof of what happened even when nothing inside
 hotkey.py could have logged it.
 
 Launch this instead of hotkey.py directly. It starts hotkey.py, waits, and
-writes ONE line to flow_watchdog.log recording exactly when and how the
-child stopped, and its best read on why. It does not restart hotkey.py -
-that is deliberate, so today's exit reason is never overwritten by a
-relaunch before there has been a chance to read it.
+writes ONE line to flow_watchdog.log per stop, recording exactly when and
+how the child stopped, and its best read on why.
+
+It then restarts hotkey.py, because something on this machine keeps ending
+it from the outside and nobody has caught the culprit. A clean close (exit
+code 0 - the user closed the window) stays down. A start failure (code 1)
+waits a minute first so a broken setup cannot spam the log. Anything else -
+the external-kill fingerprint - restarts after five seconds. Every line in
+flow_watchdog.log is evidence; the exit codes accumulate until the killer
+is identified.
 """
 
 import datetime
 import pathlib
 import subprocess
 import sys
+import time
 
 HERE = pathlib.Path(__file__).resolve().parent
 PYTHONW = HERE / "venv" / "Scripts" / "pythonw.exe"
@@ -66,18 +73,30 @@ def _verdict(code):
 def main():
     APP_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    started = datetime.datetime.now()
-    proc = subprocess.Popen([str(PYTHONW), str(HOTKEY)], cwd=str(HERE))
-    proc.wait()
-    ended = datetime.datetime.now()
-    code = proc.returncode
+    while True:
+        started = datetime.datetime.now()
+        proc = subprocess.Popen([str(PYTHONW), str(HOTKEY)], cwd=str(HERE))
+        proc.wait()
+        ended = datetime.datetime.now()
+        code = proc.returncode
 
-    line = (f"{ended.strftime('%Y-%m-%d %H:%M:%S')}  "
-            f"hotkey.py stopped after running {ended - started}  "
-            f"exit_code={code}  -  {_verdict(code)}\n")
+        line = (f"{ended.strftime('%Y-%m-%d %H:%M:%S')}  "
+                f"hotkey.py stopped after running {ended - started}  "
+                f"exit_code={code}  -  {_verdict(code)}\n")
 
-    with open(LOG_PATH, "a", encoding="utf-8") as f:
-        f.write(line)
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(line)
+
+        if code == 0:
+            # The user closed Flow on purpose; staying down is correct.
+            break
+        if code == 1:
+            # Flow could not start. A fast retry loop would only spam the
+            # log, so give it a minute before trying again.
+            time.sleep(60)
+        else:
+            # Ended from the outside. Restart at once - that is the job.
+            time.sleep(5)
 
 
 if __name__ == "__main__":

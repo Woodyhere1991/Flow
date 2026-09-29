@@ -1,0 +1,5 @@
+2026-09-29 13:16:12  hotkey.py stopped after running 0:07:22.897808  exit_code=0  -  normal exit (window closed or mainloop ended on its own)
+2026-09-29 13:23:35  hotkey.py stopped after running 0:03:11.247846  exit_code=0  -  normal exit (window closed or mainloop ended on its own)
+2026-09-29 13:42:33  hotkey.py stopped after running 0:15:53.016610  exit_code=4294967295  -  exit code 4294967295 - not a code hotkey.py's own code ever returns, which means something OUTSIDE hotkey.py ended it (forced kill, logoff, or the system killing it for memory)
+2026-09-29 13:42:38  hotkey.py stopped after running 0:00:00.432360  exit_code=0  -  normal exit (window closed or mainloop ended on its own)
+2026-09-29 17:44:27  hotkey.py stopped after running 3:18:05.410923  exit_code=0  -  normal exit (window closed or mainloop ended on its own)

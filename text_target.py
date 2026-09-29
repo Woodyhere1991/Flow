@@ -172,12 +172,11 @@ def _capture_once(hwnd):
                 # In DSH only an edit field is ever the composer; anything
                 # else focused (a button, the transcript) is not a target.
                 return None
-            if is_chat and not element.CurrentName.startswith(
-                    "Message or run a task"):
-                # A different DSH composer (e.g. the new-session box
-                # "Describe what you want to build") is the wrong
-                # destination. Abort; the words stay on the clipboard.
-                log.info("focused field is not the chat composer (%r); "
+            if is_chat and element.CurrentControlType != api.UIA_EditControlTypeId:
+                # The chat shell changed its accessible name in a recent
+                # update. Trust the focused editable control instead; the
+                # user has already placed focus there before dictating.
+                log.info("focused chat control is not editable (%r); "
                          "not delivering", element.CurrentName)
                 return None
         pattern = element.GetCurrentPattern(api.UIA_ValuePatternId).QueryInterface(
