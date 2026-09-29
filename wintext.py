@@ -303,8 +303,13 @@ def _send(*inputs):
 
 
 def _key(vk, up=False):
+    # Scancode is mandatory for Chromium/Electron editors: they ignore
+    # vk-only synthetic keys, so a Ctrl+V without a scan never pastes
+    # (proved live 29 Sep: CUA scan-routed Ctrl+V pasted into the DSH
+    # composer; Flow's wScan=0 Ctrl+V silently did nothing).
+    scan = user32.MapVirtualKeyW(vk, 0)  # MAPVK_VK_TO_VSC
     return INPUT(type=INPUT_KEYBOARD,
-                 ki=KEYBDINPUT(wVk=vk, wScan=0,
+                 ki=KEYBDINPUT(wVk=vk, wScan=scan,
                                dwFlags=KEYEVENTF_KEYUP if up else 0,
                                time=0, dwExtraInfo=None))
 
